@@ -1,0 +1,168 @@
+{
+  "projectType": "saas",
+  "projectName": "Shopify Subscriptions Reference App",
+  "projectDescription": "A reference implementation for building subscription management applications on the Shopify platform",
+  "theme": "maple",
+  "primaryColor": "#7ba44b",
+  "lightColor": "#aecf7b",
+  "darkColor": "#262923",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/selling-plans",
+              "concepts/subscription-contracts",
+              "concepts/billing-cycles",
+              "concepts/dunning"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/contract-management",
+              "features/billing-schedule",
+              "features/customer-portal",
+              "features/admin-extensions",
+              "features/webhooks"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/creating-selling-plans",
+              "guides/managing-contracts",
+              "guides/handling-billing-attempts",
+              "guides/customizing-customer-portal",
+              "guides/setting-up-webhooks",
+              "guides/job-scheduling"
+            ]
+          },
+          {
+            "group": "Extensions",
+            "pages": [
+              "extensions/overview",
+              "extensions/buyer-subscriptions",
+              "extensions/admin-subs-action",
+              "extensions/thank-you-page",
+              "extensions/pos-extension"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/requirements",
+              "deployment/database-setup",
+              "deployment/environment-variables",
+              "deployment/production"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Models",
+            "pages": [
+              "api/models/selling-plan",
+              "api/models/subscription-contract",
+              "api/models/billing-schedule",
+              "api/models/dunning-tracker"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "api/services/subscription-contract-service",
+              "api/services/dunning-service",
+              "api/services/billing-schedule-service",
+              "api/services/inventory-service",
+              "api/services/email-service"
+            ]
+          },
+          {
+            "group": "Jobs",
+            "pages": [
+              "api/jobs/overview",
+              "api/jobs/billing-jobs",
+              "api/jobs/dunning-jobs",
+              "api/jobs/email-jobs"
+            ]
+          },
+          {
+            "group": "GraphQL Operations",
+            "pages": [
+              "api/graphql/queries",
+              "api/graphql/mutations",
+              "api/graphql/fragments"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Selling plan group management with flexible delivery and pricing options",
+    "Subscription contract lifecycle management (create, pause, resume, cancel)",
+    "Automated billing cycle processing with dunning management",
+    "Customer-facing subscription management portal with UI extensions",
+    "Admin extensions for managing subscriptions from the Shopify admin",
+    "Webhook integration for subscription lifecycle events",
+    "Job scheduling system for background processing (billing, dunning, emails)",
+    "Multi-locale support with translation management",
+    "Inventory tracking and validation for subscription products",
+    "Flexible payment method update workflows"
+  ],
+  "publicApiSurface": [
+    "SellingPlan.getSellingPlanGroups()",
+    "SellingPlan.getSellingPlanGroup()",
+    "SellingPlan.createSellingPlanGroup()",
+    "SellingPlan.updateSellingPlanGroup()",
+    "SellingPlan.deleteSellingPlanGroup()",
+    "SubscriptionContract.getContracts()",
+    "SubscriptionContract.getContractDetails()",
+    "SubscriptionContract.getContractEditDetails()",
+    "SubscriptionContract.getContractDetailsForRebilling()",
+    "SubscriptionContractCancelService",
+    "SubscriptionContractPauseService",
+    "SubscriptionContractResumeService",
+    "DunningService",
+    "FinalAttemptDunningService",
+    "PenultimateAttemptDunningService",
+    "RetryDunningService",
+    "BillingScheduleCalculatorService",
+    "InventoryService",
+    "CustomerSendEmailService",
+    "MerchantSendEmailService",
+    "JobRunner.enqueue()",
+    "JobRunner.execute()",
+    "JobRunner.register()",
+    "/webhooks/subscription_contracts/create",
+    "/webhooks/subscription_contracts/activate",
+    "/webhooks/subscription_contracts/cancel",
+    "/webhooks/subscription_contracts/pause",
+    "/webhooks/subscription_billing_cycles/skip",
+    "/webhooks/subscription_billing_attempts/success",
+    "/webhooks/subscription_billing_attempts/failure",
+    "/api/routes/app.contracts.$id._index",
+    "/api/routes/app.contracts.$id.edit",
+    "/api/routes/app.contracts.$id.cancel",
+    "/api/routes/app.contracts.$id.pause",
+    "/api/routes/app.contracts.$id.resume",
+    "/api/routes/app.plans._index",
+    "/api/routes/app.plans.$id"
+  ]
+}
