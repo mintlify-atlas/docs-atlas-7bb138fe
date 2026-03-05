@@ -1,0 +1,403 @@
+---
+title: Billing Cycles
+description: Learn how billing cycles track recurring charges, process billing attempts, and manage subscription renewals
+---
+
+## What is a Billing Cycle?
+
+A billing cycle represents a single recurring billing period for a subscription contract. Each cycle tracks:
+
+- When billing should occur (`billingAttemptExpectedDate`)
+- The billing attempts made during the cycle
+- Whether the cycle was successfully billed, skipped, or failed
+- The cycle's index in the contract's lifetime
+
+<Note>
+  Billing cycles are created automatically by Shopify based on the contract's billing policy. Merchants don't create cycles manually.
+</Note>
+
+## Billing Cycle Structure
+
+While the app doesn't define a TypeScript interface for billing cycles (they're queried from Shopify), here's what a billing cycle contains:
+
+```typescript
+interface SubscriptionBillingCycle {
+  cycleIndex: number;                    // 0-indexed cycle number
+  cycleStartAt: string;                  // ISO 8601 date
+  cycleEndAt: string;                    // ISO 8601 date
+  billingAttemptExpectedDate: string;    // When to charge
+  skipped: boolean;                      // Was this cycle skipped?
+  edited: boolean;                       // Was this cycle edited?
+  status: 'BILLED' | 'UNBILLED';        // Billing status
+  billingAttempts: {
+    edges: {
+      node: BillingAttempt;
+    }[];
+  };
+}
+```
+
+## Cycle Index
+
+Each billing cycle has a zero-based index:
+
+- First billing cycle: `cycleIndex: 0`
+- Second billing cycle: `cycleIndex: 1`
+- Third billing cycle: `cycleIndex: 2`
+
+The cycle index is crucial for:
+- Tracking which cycle failed during dunning
+- Applying cycle-specific discounts
+- Determining if max cycles have been reached
+
+```typescript
+// Example: Finding a specific billing cycle
+const { subscriptionBillingCycle } = 
+  await findSubscriptionContractWithBillingCycle({
+    shop: shopDomain,
+    contractId: 'gid://shopify/SubscriptionContract/123',
+    date: '2024-03-15'
+  });
+
+console.log(subscriptionBillingCycle.cycleIndex); // e.g., 5
+```
+
+## Billing Attempts
+
+Each billing cycle can have multiple billing attempts if the initial attempt fails.
+
+### Billing Attempt Structure
+
+```typescript
+interface BillingAttempt {
+  id: string;
+  ready: boolean;                // Is attempt finalized?
+  errorCode?: string | null;     // Error code if failed
+  errorMessage?: string | null;  // Human-readable error
+  originTime: string;            // When attempt was initiated
+  idempotencyKey: string;        // Unique attempt identifier
+  orderId?: number | null;       // Created order (if successful)
+  processingError?: BillingAttemptProcessingError | null;
+}
+
+interface BillingAttemptProcessingError {
+  code: string;
+  insufficientStockProductVariants?: InsufficientStockProductVariant[];
+}
+```
+
+<Info>
+  The `ready` field indicates whether Shopify has finished processing the billing attempt. Always check this before processing dunning logic.
+</Info>
+
+### Checking if Billing Attempt is Ready
+
+From the dunning service:
+
+```typescript
+private get billingAttemptNotReady(): boolean {
+  return this.billingCycle.billingAttempts.edges
+    .map(({node}) => node)
+    .some((attempt) => attempt.ready === false);
+}
+```
+
+<Warning>
+  Never process dunning logic if `ready === false`. Wait for Shopify to finalize the billing attempt first.
+</Warning>
+
+## Billing Cycle Status
+
+### Status Types
+
+```typescript
+// From DunningService.ts:35
+static BILLING_CYCLE_BILLED_STATUS = 'BILLED';
+```
+
+A cycle can be:
+- **BILLED**: Successfully charged, cycle is complete
+- **UNBILLED**: Not yet charged or failed to charge
+
+### Checking Billing Status
+
+```typescript
+private get billingCycleAlreadyBilled(): boolean {
+  return (
+    this.billingCycle.status === DunningService.BILLING_CYCLE_BILLED_STATUS
+  );
+}
+```
+
+When a cycle is already billed, dunning logic stops:
+
+```typescript
+if (this.billingCycleAlreadyBilled) {
+  await markCompleted(dunningTracker);
+  return 'BILLING_CYCLE_ALREADY_BILLED';
+}
+```
+
+## Skipping Billing Cycles
+
+Merchants can skip individual billing cycles:
+
+```typescript
+// From webhook types
+interface SubscriptionContractsSkipBillingCycle {
+  subscription_contract_id: string;
+  cycle_start_at: Date;
+  cycle_end_at: Date;
+  cycle_index: number;
+  skipped: boolean;                  // true when skipped
+  edited: boolean;
+  billing_attempt_expected_date: Date;
+}
+```
+
+### Programmatically Skipping a Cycle
+
+From the final attempt dunning service:
+
+```typescript
+const response = await admin.graphql(
+  SubscriptionBillingCycleScheduleEdit,
+  {
+    variables: {
+      billingCycleInput: {
+        contractId: this.subscriptionContract.id,
+        selector: {
+          index: this.billingCycleIndex
+        }
+      },
+      input: {
+        reason: 'MERCHANT_INITIATED',
+        skip: true
+      }
+    }
+  }
+);
+```
+
+<Note>
+  When the `onFailure` setting is set to `'skip'`, the app automatically skips the current cycle after final billing failure.
+</Note>
+
+## Rebilling a Cycle
+
+When a billing attempt fails, the dunning system schedules a rebill:
+
+```typescript
+const job = new RebillSubscriptionJob({
+  shop: shopDomain,
+  payload: {
+    subscriptionContractId: subscriptionContract.id,
+    originTime: billingAttempt.originTime
+  }
+});
+
+await jobs.enqueue(job, {
+  scheduleTime: {
+    seconds: jobScheduleEpochTimestamp
+  }
+});
+```
+
+### Calculating Rebill Time
+
+The rebill time is calculated based on settings:
+
+```typescript
+private get scheduledTime() {
+  return DateTime.now()
+    .plus({days: this.params.daysBetweenRetryAttempts})
+    .toSeconds();
+}
+```
+
+**Example**: If `daysBetweenRetryAttempts = 3`, the next billing attempt occurs 3 days from now.
+
+## Billing Cycle Processing Flow
+
+```mermaid
+sequence
+    participant Shopify
+    participant App
+    participant DunningService
+    
+    Shopify->>App: Billing Attempt Created
+    Shopify->>App: Billing Attempt Ready
+    App->>DunningService: Check if cycle needs processing
+    
+    alt Already Billed
+        DunningService->>App: Mark dunning completed
+    else Billing Failed
+        DunningService->>DunningService: Count retry attempts
+        alt Under retry limit
+            DunningService->>App: Schedule rebill job
+            DunningService->>App: Send retry notification email
+        else Final attempt
+            DunningService->>App: Execute failure action (pause/cancel/skip)
+            DunningService->>App: Send final failure emails
+        end
+    end
+```
+
+## Dunning Tracker Integration
+
+Each billing cycle can have a dunning tracker:
+
+```typescript
+const dunningTracker = await findOrCreateBy({
+  shop: shopDomain,
+  contractId: contract.id,
+  billingCycleIndex: billingCycle.cycleIndex,
+  failureReason: failureReason
+});
+```
+
+The tracker records:
+- How many retry attempts have been made
+- When the cycle started failing
+- What the failure reason was
+- Whether dunning is complete
+
+<Info>
+  Dunning trackers prevent duplicate processing and maintain state across multiple billing attempts.
+</Info>
+
+## Billing Attempt Counts
+
+The dunning service tracks how many attempts have been made:
+
+```typescript
+private get billingAttemptsCount(): number {
+  return this.billingCycle.billingAttempts.edges.length;
+}
+
+private get finalAttempt(): boolean {
+  return this.billingAttemptsCount >= this.settings.retryAttempts;
+}
+
+private get penultimateAttempt(): boolean {
+  return this.billingAttemptsCount === this.settings.retryAttempts - 1;
+}
+```
+
+**Example scenario**:
+- `retryAttempts = 3`
+- First failure: `billingAttemptsCount = 1` → Retry
+- Second failure: `billingAttemptsCount = 2` → Penultimate (send last chance email)
+- Third failure: `billingAttemptsCount = 3` → Final attempt (pause/cancel/skip)
+
+## Error Handling
+
+### Inventory Errors
+
+```typescript
+export const SubscriptionBillingAttemptErrorCode = {
+  InsufficientInventory: 'insufficient_inventory',
+  InventoryAllocationsNotFound: 'inventory_allocations_not_found',
+} as const;
+```
+
+When inventory errors occur:
+
+```typescript
+interface InsufficientStockProductVariant {
+  variantId: string;
+  variantTitle: string;
+  image?: { url: string; altText?: string | null };
+  defaultTitle: string;
+  defaultId: string;
+}
+```
+
+<Warning>
+  Inventory errors use separate retry settings (`inventoryRetryAttempts`, `inventoryDaysBetweenRetryAttempts`, `inventoryOnFailure`) from payment errors.
+</Warning>
+
+### Payment Errors
+
+Payment errors trigger the standard dunning flow with settings:
+- `retryAttempts`
+- `daysBetweenRetryAttempts`
+- `onFailure` ('cancel' | 'pause' | 'skip')
+
+## Webhook Events
+
+Billing cycles trigger several webhook events:
+
+### Billing Attempt Success
+
+```typescript
+interface SubscriptionBillingAttemptSuccess {
+  id: number;
+  admin_graphql_api_id: string;
+  idempotency_key: string;
+  order_id: number | null;
+  admin_graphql_api_order_id: string | null;
+  subscription_contract_id: number;
+  admin_graphql_api_subscription_contract_id: string;
+  ready: boolean;
+  error_message: string | null;
+  error_code: string | null;
+}
+```
+
+### Billing Attempt Failure
+
+```typescript
+interface SubscriptionBillingAttemptFailure {
+  id: number;
+  admin_graphql_api_id: string;
+  idempotency_key: string;
+  order_id: number | null;
+  admin_graphql_api_order_id: string | null;
+  subscription_contract_id: number;
+  admin_graphql_api_subscription_contract_id: string;
+  ready: boolean;
+  error_message: string;      // Populated on failure
+  error_code: string;         // Populated on failure
+}
+```
+
+<Note>
+  The app listens to both success and failure webhooks to trigger appropriate actions like dunning management or success notifications.
+</Note>
+
+## FAQs
+
+<Accordion title="Can I manually trigger a billing attempt?">
+  Yes, using the `SubscriptionBillingAttemptCreate` mutation. However, this should be done carefully as it creates a new attempt on the current cycle.
+</Accordion>
+
+<Accordion title="What happens if I skip all remaining cycles?">
+  The contract will eventually reach EXPIRED status when it has no more cycles to process.
+</Accordion>
+
+<Accordion title="Can I edit a billing cycle after it's been billed?">
+  No, once a cycle status is BILLED, it's finalized. You can only edit future cycles.
+</Accordion>
+
+<Accordion title="How do I query a specific billing cycle?">
+  Use the `subscriptionBillingCycle` query with a `contractId` and `date` parameter. The date should fall within the cycle's start and end dates.
+</Accordion>
+
+<Accordion title="What's the difference between originTime and billingAttemptExpectedDate?">
+  `billingAttemptExpectedDate` is when the cycle should be billed. `originTime` is when a specific billing attempt was actually initiated. They can differ if rebilling occurs.
+</Accordion>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Dunning Management" icon="arrows-rotate" href="/concepts/dunning">
+    Learn how failed billing cycles are handled
+  </Card>
+  <Card title="Subscription Contracts" icon="file-contract" href="/concepts/subscription-contracts">
+    Understand the contract that billing cycles belong to
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/setting-up-webhooks">
+    Set up webhooks for billing cycle events
+  </Card>
+</CardGroup>

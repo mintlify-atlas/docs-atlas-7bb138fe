@@ -1,0 +1,124 @@
+---
+title: GraphQL Fragments
+description: Reusable GraphQL fragments used in the Shopify Subscriptions Reference App
+---
+
+This page documents reusable GraphQL fragments used throughout the app to standardize data fetching patterns.
+
+## Selling Plan Fragments
+
+### SellingPlanDetails
+
+A reusable fragment that fetches the core details of a selling plan including pricing policies and delivery policies.
+
+**Used in:**
+- `CreateSellingPlanGroup` mutation
+- `SellingPlanGroupUpdate` mutation
+
+```graphql
+fragment SellingPlanDetails on SellingPlan {
+  id
+  name
+  pricingPolicies {
+    ... on SellingPlanFixedPricingPolicy {
+      adjustmentType
+      adjustmentValue {
+        ... on SellingPlanPricingPolicyPercentageValue {
+          percentage
+        }
+        ... on MoneyV2 {
+          amount
+          currencyCode
+        }
+      }
+    }
+    ... on SellingPlanRecurringPricingPolicy {
+      adjustmentType
+    }
+    ... on SellingPlanPricingPolicyBase {
+      adjustmentType
+    }
+  }
+  deliveryPolicy {
+    ... on SellingPlanFixedDeliveryPolicy {
+      fulfillmentExactTime
+    }
+    ... on SellingPlanRecurringDeliveryPolicy {
+      interval
+      intervalCount
+    }
+  }
+}
+```
+
+### Fields
+
+<ParamField path="id" type="ID!">
+  The unique identifier for the selling plan.
+</ParamField>
+
+<ParamField path="name" type="String">
+  The name of the selling plan displayed to customers.
+</ParamField>
+
+<ParamField path="pricingPolicies" type="[SellingPlanPricingPolicy!]!">
+  The pricing policies that define how the selling plan adjusts prices. Can be:
+  - **SellingPlanFixedPricingPolicy**: A one-time price adjustment
+  - **SellingPlanRecurringPricingPolicy**: Recurring price adjustments
+  - **SellingPlanPricingPolicyBase**: Base pricing policy
+</ParamField>
+
+<ParamField path="deliveryPolicy" type="SellingPlanDeliveryPolicy">
+  The delivery policy that defines when products are delivered. Can be:
+  - **SellingPlanFixedDeliveryPolicy**: Delivery at a specific date/time
+  - **SellingPlanRecurringDeliveryPolicy**: Recurring deliveries at intervals
+</ParamField>
+
+## Usage Example
+
+Here's how the fragment is used in the `CreateSellingPlanGroup` mutation:
+
+```typescript
+import {SellingPlanDetailsFragment} from './SellingPlanDetailsFragment';
+
+const CreateSellingPlanGroup = `#graphql
+  mutation CreateSellingPlanGroup(
+    $input: SellingPlanGroupInput!
+    $resources: SellingPlanGroupResourceInput
+  ) {
+    sellingPlanGroupCreate(input: $input, resources: $resources) {
+      sellingPlanGroup {
+        id
+        sellingPlans(first: 31) {
+          edges {
+            node {
+              ...SellingPlanDetails
+            }
+          }
+        }
+      }
+      userErrors {
+        message
+      }
+    }
+  }
+  ${SellingPlanDetailsFragment}
+`;
+```
+
+## Benefits of Using Fragments
+
+<CardGroup cols={2}>
+  <Card title="Consistency" icon="check">
+    Ensures the same fields are fetched across different queries and mutations.
+  </Card>
+  <Card title="Maintainability" icon="wrench">
+    Update the fragment once to change fields across all operations.
+  </Card>
+  <Card title="Readability" icon="book">
+    Makes queries more concise by extracting common field selections.
+  </Card>
+  <Card title="Type Safety" icon="shield">
+    Fragment type information is preserved in TypeScript code generation.
+  </Card>
+</CardGroup>

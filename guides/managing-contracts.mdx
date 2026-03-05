@@ -1,0 +1,508 @@
+---
+title: Managing Subscription Contracts
+description: Learn how to manage subscription contracts, including pausing, resuming, canceling, and updating contract details
+---
+
+Subscription contracts represent the agreement between a merchant and customer for recurring orders. This guide covers all contract management operations.
+
+## Overview
+
+A subscription contract contains:
+- **Customer information**: Name, email, shipping address
+- **Line items**: Products and quantities in the subscription
+- **Billing policy**: Frequency and interval for charges
+- **Delivery method**: Shipping method and address
+- **Payment method**: Customer's payment method
+- **Status**: Current state (Active, Paused, Failed, Cancelled)
+
+## Contract Statuses
+
+| Status | Description | Available Actions |
+|--------|-------------|------------------|
+| `ACTIVE` | Contract is active and billing normally | Pause, Cancel, Bill |
+| `PAUSED` | Customer paused the subscription | Resume, Cancel |
+| `FAILED` | Last billing attempt failed | Retry Billing, Pause, Cancel |
+| `CANCELLED` | Subscription was cancelled | None |
+
+## Loading Contract Details
+
+<Steps>
+  <Step title="Query the contract">
+    Fetch the subscription contract with all necessary details:
+
+    ```typescript filename="app/models/SubscriptionContract/SubscriptionContract.server.ts"
+    export async function getContractDetails(
+      graphql: GraphQLClient,
+      gid: string,
+    ) {
+      const response = await graphql(SubscriptionContractQuery, {
+        variables: {id: gid},
+      });
+      
+      const {data} = await response.json();
+      return data.subscriptionContract;
+    }
+    ```
+  </Step>
+
+  <Step title="Load billing cycles">
+    Get upcoming and past billing cycles:
+
+    ```typescript
+    const upcomingBillingCycles = await getNextBillingCycleDates(
+      admin.graphql,
+      contractId,
+      billingCyclesCount,
+      interval,
+      intervalCount,
+    );
+
+    const {pastBillingCycles, failedBillingCycle} = 
+      await getPastBillingCycles(
+        admin.graphql,
+        contractId,
+        new Date().toISOString(),
+      );
+    ```
+  </Step>
+
+  <Step title="Display contract UI">
+    The reference app displays contracts in a grid layout:
+
+    ```typescript filename="app/routes/app.contracts.$id._index/route.tsx"
+    export async function loader({params, request}) {
+      const {admin} = await authenticate.admin(request);
+      const id = params.id;
+      const gid = composeGid('SubscriptionContract', id);
+
+      const subscriptionContract = await getContractDetails(
+        admin.graphql, 
+        gid
+      );
+
+      const [upcomingBillingCycleResults, pastBillingCyclesResult] =
+        await Promise.all([
+          getNextBillingCycleDates(admin.graphql, gid, ...),
+          getPastBillingCycles(admin.graphql, gid, ...),
+        ]);
+
+      return {
+        subscriptionContract,
+        upcomingBillingCycles,
+        pastBillingCycles,
+        failedBillingCycle,
+      };
+    }
+    ```
+  </Step>
+</Steps>
+
+## Pausing Contracts
+
+Allow customers to temporarily pause their subscription:
+
+```graphql
+mutation SubscriptionContractPause($subscriptionContractId: ID!) {
+  subscriptionContractPause(subscriptionContractId: $subscriptionContractId) {
+    contract {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### Implementation
+
+```typescript filename="app/routes/app.contracts.$id._index/hooks/usePauseAction.ts"
+export function usePauseAction() {
+  const {subscriptionContract} = useLoaderData<typeof loader>();
+  const submit = useSubmit();
+  const [pauseLoading, setPauseLoading] = useState(false);
+
+  const pauseContract = useCallback(async () => {
+    setPauseLoading(true);
+    
+    submit(
+      {contractId: subscriptionContract.id},
+      {
+        method: 'post',
+        action: `/app/contracts/${parseGid(subscriptionContract.id)}/pause`,
+      },
+    );
+  }, [subscriptionContract.id, submit]);
+
+  return {pauseContract, pauseLoading};
+}
+```
+
+<Note>
+  Paused contracts won't generate billing attempts. No action is needed on future billing cycles - they're automatically skipped.
+</Note>
+
+## Resuming Contracts
+
+Reactivate a paused subscription:
+
+```graphql
+mutation SubscriptionContractResume($subscriptionContractId: ID!) {
+  subscriptionContractResume(subscriptionContractId: $subscriptionContractId) {
+    contract {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### Implementation
+
+```typescript filename="app/routes/app.contracts.$id._index/hooks/useResumeAction.ts"
+export function useResumeAction() {
+  const {subscriptionContract} = useLoaderData<typeof loader>();
+  const submit = useSubmit();
+  const [resumeLoading, setResumeLoading] = useState(false);
+
+  const resumeContract = useCallback(async () => {
+    setResumeLoading(true);
+    
+    submit(
+      {contractId: subscriptionContract.id},
+      {
+        method: 'post',
+        action: `/app/contracts/${parseGid(subscriptionContract.id)}/resume`,
+      },
+    );
+  }, [subscriptionContract.id, submit]);
+
+  return {resumeContract, resumeLoading};
+}
+```
+
+## Cancelling Contracts
+
+Permanently cancel a subscription:
+
+```graphql
+mutation SubscriptionContractCancel($subscriptionContractId: ID!) {
+  subscriptionContractCancel(subscriptionContractId: $subscriptionContractId) {
+    contract {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### With Confirmation Modal
+
+```typescript filename="app/routes/app.contracts.$id._index/components/CancelSubscriptionModal/CancelSubscriptionModal.tsx"
+export function CancelSubscriptionModal({open, onClose}: Props) {
+  const {subscriptionContract} = useLoaderData<typeof loader>();
+  const submit = useSubmit();
+  const [loading, setLoading] = useState(false);
+
+  const handleCancel = useCallback(() => {
+    setLoading(true);
+    submit(
+      {contractId: subscriptionContract.id},
+      {
+        method: 'post',
+        action: `/app/contracts/${parseGid(subscriptionContract.id)}/cancel`,
+      },
+    );
+  }, [subscriptionContract.id, submit]);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Cancel subscription"
+      primaryAction={{
+        content: 'Cancel subscription',
+        onAction: handleCancel,
+        destructive: true,
+        loading,
+      }}
+      secondaryActions={[{content: 'Keep subscription', onAction: onClose}]}
+    >
+      <p>This will immediately cancel the subscription.</p>
+    </Modal>
+  );
+}
+```
+
+<Warning>
+  Cancellation is permanent and cannot be undone. Consider offering a pause option first.
+</Warning>
+
+## Updating Contract Details
+
+To update contract details, use the subscription draft API:
+
+<Steps>
+  <Step title="Create a subscription draft">
+    Start by creating a draft from the existing contract:
+
+    ```graphql
+    mutation CreateDraft($contractId: ID!) {
+      subscriptionContractDraftCreate(contractId: $contractId) {
+        draft {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Make updates to the draft">
+    Update line items, delivery address, or billing policy:
+
+    ```graphql
+    mutation UpdateDraftLine(
+      $draftId: ID!
+      $lineId: ID!
+      $quantity: Int!
+    ) {
+      subscriptionDraftLineUpdate(
+        draftId: $draftId
+        lineId: $lineId
+        input: {quantity: $quantity}
+      ) {
+        draft {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Commit the draft">
+    Apply the changes to the contract:
+
+    ```graphql
+    mutation CommitDraft($draftId: ID!) {
+      subscriptionDraftCommit(draftId: $draftId) {
+        contract {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Billing a Contract Manually
+
+Retry a failed billing attempt or create an immediate charge:
+
+```typescript filename="app/routes/app.contracts.$id._index/hooks/useBillContractAction.ts"
+export function useBillContractAction() {
+  const {subscriptionContract, failedBillingCycle} = 
+    useLoaderData<typeof loader>();
+  const fetcher = useFetcher();
+  const [isAttemptInProgress, setIsAttemptInProgress] = useState(false);
+
+  const billContract = useCallback(
+    async (cycleIndex: number, ignoreInventoryErrors: boolean) => {
+      setIsAttemptInProgress(true);
+
+      const formData = new FormData();
+      formData.append('contractId', subscriptionContract.id);
+      formData.append('cycleIndex', String(cycleIndex));
+      formData.append('ignoreInventoryErrors', String(ignoreInventoryErrors));
+
+      fetcher.submit(formData, {
+        method: 'post',
+        action: `/app/contracts/${parseGid(subscriptionContract.id)}/bill-contract`,
+      });
+
+      // Poll for completion
+      await pollBillingAttempt(cycleIndex);
+      setIsAttemptInProgress(false);
+    },
+    [subscriptionContract.id, fetcher],
+  );
+
+  return {
+    billContract,
+    billContractLoading: fetcher.state !== 'idle',
+    isAttemptInProgress,
+  };
+}
+```
+
+### Billing Mutation
+
+```graphql
+mutation SubscriptionBillingCycleCharge(
+  $subscriptionContractId: ID!
+  $originTime: DateTime!
+) {
+  subscriptionBillingCycleCharge(
+    subscriptionContractId: $subscriptionContractId
+    billingCycleSelector: {date: $originTime}
+  ) {
+    subscriptionBillingAttempt {
+      id
+      ready
+    }
+    userErrors {
+      field
+      message
+      code
+    }
+  }
+}
+```
+
+<Tip>
+  Use polling to check if the billing attempt completed successfully. The `ready` field indicates when processing is complete.
+</Tip>
+
+## Handling Failed Billing
+
+When billing fails, the contract status changes to `FAILED`:
+
+```typescript filename="Display failed billing banner"
+const shouldShowFailedBillingAttemptBanner =
+  !hideStaleInventoryBanner &&
+  subscriptionContract.lastBillingAttemptErrorType === 'INVENTORY_ERROR' &&
+  failedBillingCycle?.billingAttemptErrorCode === 'INSUFFICIENT_INVENTORY' &&
+  !isAttemptInProgress &&
+  (status === SubscriptionContractStatus.Active ||
+   status === SubscriptionContractStatus.Failed);
+
+if (shouldShowFailedBillingAttemptBanner) {
+  return (
+    <FailedBillingAttemptBanner
+      onOpen={() => setOpenCreateOrderModal(true)}
+      billingCycleDate={failedBillingCycle.billingAttemptExpectedDate}
+      productCount={failedBillingCycle.insufficientStockProductVariants.length}
+    />
+  );
+}
+```
+
+### Common Error Codes
+
+| Error Code | Description | Resolution |
+|------------|-------------|------------|
+| `INSUFFICIENT_INVENTORY` | Not enough inventory | Restock product or skip cycle |
+| `INVENTORY_ALLOCATIONS_NOT_FOUND` | Inventory not allocated | Check location settings |
+| `PAYMENT_METHOD_DECLINED` | Payment failed | Customer needs to update payment |
+| `CONTRACT_PAUSED` | Contract is paused | Resume contract first |
+
+## Skipping Billing Cycles
+
+Allow customers to skip a single billing cycle:
+
+```graphql
+mutation SkipBillingCycle(
+  $subscriptionContractId: ID!
+  $billingCycleIndex: Int!
+) {
+  subscriptionBillingCycleSkip(
+    subscriptionContractId: $subscriptionContractId
+    billingCycleIndex: $billingCycleIndex
+  ) {
+    billingCycle {
+      skipped
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+<Note>
+  Skipping a cycle doesn't pause the subscription. The next scheduled cycle will process normally.
+</Note>
+
+## Contract Actions Summary
+
+The reference app implements all actions in a unified menu:
+
+```typescript filename="Contract action menu"
+const actions = [
+  billContractAction && {
+    content: t('actions.billContract.title'),
+    destructive: false,
+    disabled: isAttemptInProgress,
+    onAction: () => billContract(failedBillingCycle.cycleIndex, false),
+    loading: billContractLoading,
+  },
+  status === SubscriptionContractStatus.Active && {
+    content: t('actions.pause.title'),
+    onAction: pauseContract,
+    loading: pauseLoading,
+  },
+  status === SubscriptionContractStatus.Paused && {
+    content: t('actions.resume.title'),
+    onAction: resumeContract,
+    loading: resumeLoading,
+  },
+  status !== SubscriptionContractStatus.Cancelled && {
+    content: t('actions.cancel.title'),
+    destructive: true,
+    onAction: () => setOpenCancelModal(true),
+  },
+].filter(Boolean);
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Always handle user errors">
+    Check for `userErrors` in every mutation response and display clear messages to users.
+  </Step>
+
+  <Step title="Confirm destructive actions">
+    Use modals to confirm cancellations and other permanent changes.
+  </Step>
+
+  <Step title="Provide retry options">
+    For failed billing, offer both automatic retry and manual retry with inventory override.
+  </Step>
+
+  <Step title="Show billing history">
+    Display past orders so merchants can track subscription performance.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Handling Billing Attempts" icon="credit-card" href="/guides/handling-billing-attempts">
+    Learn how to manage billing attempts and failures
+  </Card>
+  <Card title="Customizing Customer Portal" icon="user" href="/guides/customizing-customer-portal">
+    Enable customers to manage their own subscriptions
+  </Card>
+</CardGroup>

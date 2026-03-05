@@ -1,0 +1,331 @@
+---
+title: 'Dunning Service'
+description: 'Services for handling subscription payment failures and retry logic'
+---
+
+## Overview
+
+The dunning services manage payment failure scenarios for subscription contracts. They implement a multi-stage retry system that includes customer notifications, automatic rebilling attempts, and configurable final actions.
+
+## DunningService
+
+The main orchestrator for payment failure handling. Determines the appropriate dunning action based on billing attempt count and executes the corresponding service.
+
+### Constructor
+
+<ParamField path="shopDomain" type="string" required>
+  The shop domain for the subscription
+</ParamField>
+
+<ParamField path="contract" type="SubscriptionContract" required>
+  The subscription contract object with billing cycle data
+</ParamField>
+
+<ParamField path="billingCycle" type="SubscriptionBillingCycle" required>
+  The current billing cycle with billing attempts
+</ParamField>
+
+<ParamField path="settings" type="Settings" required>
+  Shop settings including retry attempts and days between retries
+</ParamField>
+
+<ParamField path="failureReason" type="string" required>
+  The reason for the payment failure
+</ParamField>
+
+### Methods
+
+#### run()
+
+Executes the dunning workflow based on billing attempt count.
+
+<ResponseField name="return" type="Promise<DunningServiceResult>">
+  Returns one of the following result codes:
+  - `BILLING_ATTEMPT_NOT_READY`: Billing attempt is not yet ready to process
+  - `BILLING_CYCLE_ALREADY_BILLED`: Billing cycle has already been successfully billed
+  - `CONTRACT_IN_TERMINAL_STATUS`: Contract is expired or cancelled
+  - `FINAL_ATTEMPT_DUNNING`: Final attempt processed, contract action taken
+  - `PENULTIMATE_ATTEMPT_DUNNING`: Second-to-last attempt, last warning sent
+  - `RETRY_DUNNING`: Regular retry attempt scheduled
+</ResponseField>
+
+**Decision Logic:**
+
+1. **Validation**: Checks if billing attempt is ready and cycle is not already billed
+2. **Dunning Tracker**: Creates or retrieves dunning tracker for idempotency
+3. **Terminal Status Check**: Completes dunning if contract is expired/cancelled
+4. **Attempt Count**:
+   - If attempts ≥ `settings.retryAttempts`: Execute `FinalAttemptDunningService`
+   - If attempts = `settings.retryAttempts - 1`: Execute `PenultimateAttemptDunningService`
+   - Otherwise: Execute `RetryDunningService`
+
+### Constants
+
+- `BILLING_CYCLE_BILLED_STATUS = 'BILLED'`
+- `TERMINAL_STATUS = ['EXPIRED', 'CANCELLED']`
+
+### Usage Example
+
+```typescript
+import { DunningService } from '~/services/DunningService';
+
+const dunningService = new DunningService({
+  shopDomain: 'example.myshopify.com',
+  contract: subscriptionContract,
+  billingCycle: currentBillingCycle,
+  settings: {
+    retryAttempts: 3,
+    daysBetweenRetryAttempts: 3,
+    onFailure: 'pause'
+  },
+  failureReason: 'PAYMENT_METHOD_DECLINED'
+});
+
+const result = await dunningService.run();
+
+switch (result) {
+  case 'FINAL_ATTEMPT_DUNNING':
+    console.log('Final attempt processed, contract paused/cancelled');
+    break;
+  case 'RETRY_DUNNING':
+    console.log('Retry scheduled for future date');
+    break;
+  // Handle other cases...
+}
+```
+
+---
+
+## RetryDunningService
+
+Handles regular retry attempts for failed subscription billing.
+
+### Constructor
+
+<ParamField path="shopDomain" type="string" required>
+  The shop domain for the subscription
+</ParamField>
+
+<ParamField path="subscriptionContract" type="SubscriptionContract" required>
+  The subscription contract object
+</ParamField>
+
+<ParamField path="billingAttempt" type="BillingAttempt" required>
+  The most recent billing attempt
+</ParamField>
+
+<ParamField path="billingCycleIndex" type="number" required>
+  The index of the current billing cycle
+</ParamField>
+
+<ParamField path="daysBetweenRetryAttempts" type="number" required>
+  Number of days to wait before the next retry
+</ParamField>
+
+<ParamField path="sendCustomerEmail" type="boolean" required>
+  Whether to send a payment failure email to the customer
+</ParamField>
+
+### Methods
+
+#### run()
+
+Schedules a rebill job and optionally sends a customer notification.
+
+<ResponseField name="return" type="Promise<void>">
+  Returns a promise that resolves when the retry is scheduled
+</ResponseField>
+
+**Behavior:**
+- Schedules a `RebillSubscriptionJob` for `daysBetweenRetryAttempts` days in the future
+- Sends customer email with template `SUBSCRIPTION_PAYMENT_FAILURE_RETRY` if enabled
+- Uses Luxon for timezone-aware date calculations
+
+### Usage Example
+
+```typescript
+import { RetryDunningService } from '~/services/RetryDunningService';
+
+const retryService = new RetryDunningService({
+  shopDomain: 'example.myshopify.com',
+  subscriptionContract: contract,
+  billingAttempt: lastBillingAttempt,
+  billingCycleIndex: 5,
+  daysBetweenRetryAttempts: 3,
+  sendCustomerEmail: true
+});
+
+await retryService.run();
+// Rebill job scheduled for 3 days from now
+// Customer receives payment failure retry email
+```
+
+---
+
+## PenultimateAttemptDunningService
+
+Handles the second-to-last retry attempt before final action is taken.
+
+### Constructor
+
+<ParamField path="shopDomain" type="string" required>
+  The shop domain for the subscription
+</ParamField>
+
+<ParamField path="subscriptionContract" type="SubscriptionContract" required>
+  The subscription contract object
+</ParamField>
+
+<ParamField path="billingAttempt" type="BillingAttempt" required>
+  The most recent billing attempt
+</ParamField>
+
+<ParamField path="daysBetweenRetryAttempts" type="number" required>
+  Number of days to wait before the final attempt
+</ParamField>
+
+<ParamField path="dunningStatus" type="OnFailureTypeType" required>
+  The configured action to take on final failure (cancel, pause, or skip)
+</ParamField>
+
+<ParamField path="billingCycleIndex" type="number" required>
+  The index of the current billing cycle
+</ParamField>
+
+### Methods
+
+#### run()
+
+Schedules the final rebill attempt and sends a last warning email.
+
+<ResponseField name="return" type="Promise<void>">
+  Returns a promise that resolves when the penultimate attempt is processed
+</ResponseField>
+
+**Behavior:**
+- Schedules a `RebillSubscriptionJob` for the final attempt
+- Sends customer email with template `SUBSCRIPTION_PAYMENT_FAILURE_LAST_ATTEMPT`
+- Includes the dunning status and final charge date in the email
+- Informs customer of the action that will be taken if payment fails
+
+### Usage Example
+
+```typescript
+import { PenultimateAttemptDunningService } from '~/services/PenultimateAttemptDunningService';
+
+const penultimateService = new PenultimateAttemptDunningService({
+  shopDomain: 'example.myshopify.com',
+  subscriptionContract: contract,
+  billingAttempt: lastBillingAttempt,
+  daysBetweenRetryAttempts: 3,
+  dunningStatus: 'pause',
+  billingCycleIndex: 5
+});
+
+await penultimateService.run();
+// Customer receives "last attempt" warning
+// Final retry scheduled for 3 days from now
+```
+
+---
+
+## FinalAttemptDunningService
+
+Handles the final payment failure by taking the configured action (cancel, pause, or skip).
+
+### Constructor
+
+<ParamField path="shop" type="string" required>
+  The shop domain for the subscription
+</ParamField>
+
+<ParamField path="subscriptionContract" type="SubscriptionContract" required>
+  The subscription contract object
+</ParamField>
+
+<ParamField path="billingCycleIndex" type="number" required>
+  The index of the current billing cycle
+</ParamField>
+
+<ParamField path="onFailure" type="OnFailureTypeType" required>
+  The action to take: 'cancel', 'pause', or 'skip'
+</ParamField>
+
+<ParamField path="sendCustomerEmail" type="boolean" required>
+  Whether to send a payment failure email to the customer
+</ParamField>
+
+<ParamField path="merchantEmailTemplateName" type="MerchantEmailTemplateNameType" required>
+  The email template to use for merchant notification
+</ParamField>
+
+### Methods
+
+#### run()
+
+Executes the final dunning action based on the configured failure handling.
+
+<ResponseField name="return" type="Promise<void>">
+  Returns a promise that resolves when all final actions are complete
+</ResponseField>
+
+**Behavior:**
+1. **Cancel**: Calls `SubscriptionContractCancelService` to cancel the contract
+2. **Pause**: Calls `SubscriptionContractPauseService` to pause the contract
+3. **Skip**: Calls `subscriptionBillingCycleScheduleEdit` to skip the billing cycle
+4. Sends customer email with template `SUBSCRIPTION_PAYMENT_FAILURE`
+5. Sends merchant notification email
+6. Marks dunning tracker as completed
+
+### Usage Example
+
+```typescript
+import { FinalAttemptDunningService } from '~/services/FinalAttemptDunningService';
+import { MerchantEmailTemplateName } from '~/services/MerchantSendEmailService';
+
+const finalService = new FinalAttemptDunningService({
+  shop: 'example.myshopify.com',
+  subscriptionContract: contract,
+  billingCycleIndex: 5,
+  onFailure: 'pause',
+  sendCustomerEmail: true,
+  merchantEmailTemplateName: MerchantEmailTemplateName.SubscriptionPaymentFailureMerchant
+});
+
+await finalService.run();
+// Contract is paused
+// Customer and merchant receive notifications
+```
+
+## Complete Dunning Flow Example
+
+```typescript
+import { DunningService } from '~/services/DunningService';
+
+// Called from subscription_billing_attempts/create webhook
+const handlePaymentFailure = async (billingAttempt) => {
+  // Fetch contract and billing cycle data
+  const contract = await getSubscriptionContract(billingAttempt.contractId);
+  const billingCycle = await getBillingCycle(billingAttempt.billingCycleId);
+  const settings = await getShopSettings(shopDomain);
+
+  // Execute dunning workflow
+  const dunningService = new DunningService({
+    shopDomain: 'example.myshopify.com',
+    contract,
+    billingCycle,
+    settings: {
+      retryAttempts: 3, // Total attempts before final action
+      daysBetweenRetryAttempts: 3, // Days between each retry
+      onFailure: 'pause' // Action on final failure
+    },
+    failureReason: billingAttempt.errorCode
+  });
+
+  const result = await dunningService.run();
+
+  // Attempt 1: RETRY_DUNNING - schedules retry in 3 days
+  // Attempt 2: PENULTIMATE_ATTEMPT_DUNNING - schedules final retry, sends warning
+  // Attempt 3: FINAL_ATTEMPT_DUNNING - pauses contract, notifies customer and merchant
+};
+```

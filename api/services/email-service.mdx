@@ -1,0 +1,412 @@
+---
+title: 'Email Service'
+description: 'Services for sending customer and merchant email notifications'
+---
+
+## Overview
+
+The email services handle sending transactional notifications to customers and merchants for subscription events. These services support multiple email templates for different subscription lifecycle events.
+
+## CustomerSendEmailService
+
+Sends transactional emails to customers for subscription-related events.
+
+### Methods
+
+#### run()
+
+Sends an email to a customer based on the provided template.
+
+<ParamField path="shopDomain" type="string" required>
+  The shop domain for the customer's subscription
+</ParamField>
+
+<ParamField path="customerId" type="string" required>
+  The Shopify customer ID (e.g., 'gid://shopify/Customer/123')
+</ParamField>
+
+<ParamField path="templateInput" type="CustomerEmailTemplateInput" required>
+  The email template configuration object
+</ParamField>
+
+<ResponseField name="return" type="Promise<boolean>">
+  Returns `true` when the email is successfully queued/sent
+</ResponseField>
+
+### Email Template Input
+
+<ParamField path="subscriptionContractId" type="string" required>
+  The subscription contract ID
+</ParamField>
+
+<ParamField path="subscriptionTemplateName" type="CustomerEmailTemplateNameType" required>
+  The email template to use (see available templates below)
+</ParamField>
+
+<ParamField path="billingCycleIndex" type="number">
+  The billing cycle index (required for payment failure emails)
+</ParamField>
+
+<ParamField path="dunningStatus" type="EmailDunningStatusType">
+  The dunning status for payment failure emails ('pause', 'cancel', or 'skip')
+</ParamField>
+
+<ParamField path="finalChargeDate" type="string">
+  ISO date string for the final charge attempt (used in last attempt emails)
+</ParamField>
+
+### Available Email Templates
+
+<ParamField path="NEW_SUBSCRIPTION" type="CustomerEmailTemplateName">
+  Sent when a customer creates a new subscription
+</ParamField>
+
+<ParamField path="SUBSCRIPTION_CANCELED" type="CustomerEmailTemplateName">
+  Sent when a subscription is cancelled
+</ParamField>
+
+<ParamField path="SUBSCRIPTION_PAUSED" type="CustomerEmailTemplateName">
+  Sent when a subscription is paused
+</ParamField>
+
+<ParamField path="SUBSCRIPTION_RESUMED" type="CustomerEmailTemplateName">
+  Sent when a paused subscription is resumed
+</ParamField>
+
+<ParamField path="SUBSCRIPTION_SKIPPED" type="CustomerEmailTemplateName">
+  Sent when a billing cycle is skipped
+</ParamField>
+
+<ParamField path="SUBSCRIPTION_PAYMENT_FAILURE" type="CustomerEmailTemplateName">
+  Sent on the final payment failure attempt
+</ParamField>
+
+<ParamField path="SUBSCRIPTION_PAYMENT_FAILURE_RETRY" type="CustomerEmailTemplateName">
+  Sent when a payment fails and will be retried
+</ParamField>
+
+<ParamField path="SUBSCRIPTION_PAYMENT_FAILURE_LAST_ATTEMPT" type="CustomerEmailTemplateName">
+  Sent on the penultimate attempt, warning of final action
+</ParamField>
+
+### Usage Examples
+
+#### New Subscription Email
+
+```typescript
+import { CustomerSendEmailService, CustomerEmailTemplateName } from '~/services/CustomerSendEmailService';
+
+const emailService = new CustomerSendEmailService();
+
+await emailService.run(
+  'example.myshopify.com',
+  'gid://shopify/Customer/123456',
+  {
+    subscriptionContractId: 'gid://shopify/SubscriptionContract/789',
+    subscriptionTemplateName: CustomerEmailTemplateName.NewSubscription
+  }
+);
+```
+
+#### Subscription Paused Email
+
+```typescript
+import { CustomerSendEmailService, CustomerEmailTemplateName } from '~/services/CustomerSendEmailService';
+
+const emailService = new CustomerSendEmailService();
+
+await emailService.run(
+  'example.myshopify.com',
+  'gid://shopify/Customer/123456',
+  {
+    subscriptionContractId: 'gid://shopify/SubscriptionContract/789',
+    subscriptionTemplateName: CustomerEmailTemplateName.SubscriptionPaused
+  }
+);
+```
+
+#### Payment Failure Retry Email
+
+```typescript
+import { CustomerSendEmailService, CustomerEmailTemplateName } from '~/services/CustomerSendEmailService';
+
+const emailService = new CustomerSendEmailService();
+
+await emailService.run(
+  'example.myshopify.com',
+  'gid://shopify/Customer/123456',
+  {
+    subscriptionContractId: 'gid://shopify/SubscriptionContract/789',
+    subscriptionTemplateName: CustomerEmailTemplateName.SubscriptionPaymentFailureRetry,
+    billingCycleIndex: 5
+  }
+);
+```
+
+#### Payment Failure Last Attempt Email
+
+```typescript
+import { CustomerSendEmailService, CustomerEmailTemplateName } from '~/services/CustomerSendEmailService';
+
+const emailService = new CustomerSendEmailService();
+
+await emailService.run(
+  'example.myshopify.com',
+  'gid://shopify/Customer/123456',
+  {
+    subscriptionContractId: 'gid://shopify/SubscriptionContract/789',
+    subscriptionTemplateName: CustomerEmailTemplateName.SubscriptionPaymentFailureLastAttempt,
+    billingCycleIndex: 5,
+    dunningStatus: 'pause', // What will happen if payment fails
+    finalChargeDate: '2024-03-20' // When the final attempt will be made
+  }
+);
+```
+
+---
+
+## MerchantSendEmailService
+
+Sends notification emails to merchants for subscription events that require their attention.
+
+### Methods
+
+#### run()
+
+Sends an email to the merchant.
+
+<ParamField path="shopDomain" type="string" required>
+  The shop domain
+</ParamField>
+
+<ParamField path="templateInput" type="MerchantEmailTemplateInput" required>
+  The email template configuration object
+</ParamField>
+
+<ResponseField name="return" type="Promise<boolean>">
+  Returns `true` when the email is successfully queued/sent
+</ResponseField>
+
+### Email Template Input
+
+<ParamField path="subscriptionContractId" type="string" required>
+  The subscription contract ID
+</ParamField>
+
+<ParamField path="subscriptionTemplateName" type="MerchantEmailTemplateNameType" required>
+  The email template to use (see available templates below)
+</ParamField>
+
+<ParamField path="dunningStatus" type="EmailDunningStatusType">
+  The dunning status for payment failure emails ('pause', 'cancel', or 'skip')
+</ParamField>
+
+### Available Email Templates
+
+<ParamField path="SUBSCRIPTION_CANCELED__MERCHANT_" type="MerchantEmailTemplateName">
+  Notifies merchant when a subscription is cancelled
+</ParamField>
+
+<ParamField path="SUBSCRIPTION_PAYMENT_FAILURE__MERCHANT_" type="MerchantEmailTemplateName">
+  Notifies merchant of final payment failure and action taken
+</ParamField>
+
+<ParamField path="SUBSCRIPTION_INVENTORY_FAILURE__MERCHANT_" type="MerchantEmailTemplateName">
+  Notifies merchant of inventory-related billing failures
+</ParamField>
+
+### Usage Examples
+
+#### Payment Failure Merchant Notification
+
+```typescript
+import { MerchantSendEmailService, MerchantEmailTemplateName } from '~/services/MerchantSendEmailService';
+
+const emailService = new MerchantSendEmailService();
+
+await emailService.run(
+  'example.myshopify.com',
+  {
+    subscriptionContractId: 'gid://shopify/SubscriptionContract/789',
+    subscriptionTemplateName: MerchantEmailTemplateName.SubscriptionPaymentFailureMerchant,
+    dunningStatus: 'pause'
+  }
+);
+```
+
+#### Inventory Failure Merchant Notification
+
+```typescript
+import { MerchantSendEmailService, MerchantEmailTemplateName } from '~/services/MerchantSendEmailService';
+
+const emailService = new MerchantSendEmailService();
+
+await emailService.run(
+  'example.myshopify.com',
+  {
+    subscriptionContractId: 'gid://shopify/SubscriptionContract/789',
+    subscriptionTemplateName: MerchantEmailTemplateName.SubscriptionInventoryFailureMerchant
+  }
+);
+```
+
+#### Subscription Cancelled Merchant Notification
+
+```typescript
+import { MerchantSendEmailService, MerchantEmailTemplateName } from '~/services/MerchantSendEmailService';
+
+const emailService = new MerchantSendEmailService();
+
+await emailService.run(
+  'example.myshopify.com',
+  {
+    subscriptionContractId: 'gid://shopify/SubscriptionContract/789',
+    subscriptionTemplateName: MerchantEmailTemplateName.SubscriptionCancelledMerchant,
+    dunningStatus: 'cancel' // If cancelled due to payment failure
+  }
+);
+```
+
+## Integration with Services
+
+### Automatic Email Sending
+
+Email services are automatically called by other services at appropriate lifecycle events:
+
+#### Pause Service Integration
+
+```typescript
+// From SubscriptionContractPauseService
+if (subscriptionContractPause.contract?.customer?.id && sendCustomerEmail) {
+  jobs.enqueue(
+    new CustomerSendEmailJob({
+      payload: {
+        admin_graphql_api_id: subscriptionContractId,
+        admin_graphql_api_customer_id: subscriptionContractPause.contract.customer.id,
+        emailTemplate: 'SUBSCRIPTION_PAUSED'
+      },
+      shop: shopDomain
+    })
+  );
+}
+```
+
+#### Resume Service Integration
+
+```typescript
+// From SubscriptionContractResumeService
+if (subscriptionContractActivate.contract?.customer?.id) {
+  jobs.enqueue(
+    new CustomerSendEmailJob({
+      payload: {
+        admin_graphql_api_id: subscriptionContractId,
+        admin_graphql_api_customer_id: subscriptionContractActivate.contract.customer.id,
+        emailTemplate: 'SUBSCRIPTION_RESUMED'
+      },
+      shop: shopDomain
+    })
+  );
+}
+```
+
+#### Dunning Service Integration
+
+```typescript
+// From FinalAttemptDunningService
+if (sendCustomerEmail) {
+  await new CustomerSendEmailService().run(
+    shop,
+    customerId,
+    {
+      subscriptionContractId: subscriptionContract.id,
+      subscriptionTemplateName: CustomerEmailTemplateName.SubscriptionPaymentFailure,
+      dunningStatus: emailDunningStatus(onFailure),
+      billingCycleIndex: billingCycleIndex
+    }
+  );
+}
+
+await new MerchantSendEmailService().run(
+  shop,
+  {
+    subscriptionContractId: subscriptionContract.id,
+    subscriptionTemplateName: MerchantEmailTemplateName.SubscriptionPaymentFailureMerchant,
+    dunningStatus: emailDunningStatus(onFailure)
+  }
+);
+```
+
+## Email Template Data
+
+### Customer Email Context
+
+Customer emails have access to the following data:
+
+- **Customer Information**: Name, email, phone
+- **Subscription Details**: Products, pricing, frequency
+- **Billing Cycle**: Current cycle index, next billing date
+- **Dunning Status**: Action that will be taken (pause, cancel, skip)
+- **Final Charge Date**: When the last retry will occur
+
+### Merchant Email Context
+
+Merchant emails include:
+
+- **Subscription Contract**: ID and status
+- **Customer Information**: Name, email, order history
+- **Action Taken**: What happened to the subscription
+- **Dunning Configuration**: Current retry settings
+
+## Best Practices
+
+### Customer Communications
+
+1. **Always Send for Major Events**: New subscription, cancellation, resumption
+2. **Conditional Sending for Pause**: Use `sendCustomerEmail` parameter to control
+3. **Clear Dunning Messages**: Include next steps and action dates
+4. **Payment Retry Clarity**: Explain when the next charge will occur
+
+### Merchant Communications
+
+1. **Final Attempt Only**: Don't spam merchants with every retry
+2. **Immediate Inventory Notifications**: Allow merchants to restock quickly
+3. **Include Action Details**: What happened and why
+
+### Error Handling
+
+```typescript
+try {
+  await new CustomerSendEmailService().run(
+    shopDomain,
+    customerId,
+    templateInput
+  );
+} catch (error) {
+  // Email failures should not block subscription operations
+  logger.error({ error, shopDomain, customerId }, 'Failed to send customer email');
+  // Continue processing...
+}
+```
+
+## Testing Email Services
+
+```typescript
+import { CustomerSendEmailService, CustomerEmailTemplateName } from '~/services/CustomerSendEmailService';
+
+describe('CustomerSendEmailService', () => {
+  it('sends new subscription email', async () => {
+    const service = new CustomerSendEmailService();
+    
+    const result = await service.run(
+      'test-shop.myshopify.com',
+      'gid://shopify/Customer/1',
+      {
+        subscriptionContractId: 'gid://shopify/SubscriptionContract/1',
+        subscriptionTemplateName: CustomerEmailTemplateName.NewSubscription
+      }
+    );
+    
+    expect(result).toBe(true);
+  });
+});
+```

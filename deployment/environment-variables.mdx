@@ -1,0 +1,422 @@
+---
+title: Environment Variables
+description: Required environment variables and configuration for the Shopify Subscriptions Reference App
+---
+
+## Overview
+
+The Shopify Subscriptions Reference App requires several environment variables to connect to Shopify APIs, manage sessions, and configure application behavior.
+
+## Required Variables
+
+These environment variables are essential for the app to function:
+
+### Shopify API Credentials
+
+<ParamField path="SHOPIFY_API_KEY" type="string" required>
+  Your Shopify app's Client ID (API Key) from the Partner Dashboard.
+  
+  ```bash
+  SHOPIFY_API_KEY="your_api_key_here"
+  ```
+</ParamField>
+
+<ParamField path="SHOPIFY_API_SECRET" type="string" required>
+  Your Shopify app's Client Secret (API Secret) from the Partner Dashboard.
+  
+  ```bash
+  SHOPIFY_API_SECRET="your_api_secret_here"
+  ```
+  
+  <Warning>
+    Never commit this value to version control. Keep it secret and secure.
+  </Warning>
+</ParamField>
+
+<ParamField path="SHOPIFY_APP_URL" type="string" required>
+  The public URL where your app is hosted. Must be HTTPS in production.
+  
+  ```bash
+  # Development
+  SHOPIFY_APP_URL="https://example.ngrok-free.app"
+  
+  # Production
+  SHOPIFY_APP_URL="https://your-app-domain.com"
+  ```
+</ParamField>
+
+<ParamField path="SCOPES" type="string" required>
+  Comma-separated list of Shopify API scopes your app requires.
+  
+  ```bash
+  SCOPES="customer_read_customers,customer_read_orders,customer_read_own_subscription_contracts,customer_write_customers,customer_write_own_subscription_contracts,read_all_orders,read_locales,read_locations,read_themes,write_customer_payment_methods,write_customers,write_metaobject_definitions,write_metaobjects,write_orders,write_own_subscription_contracts,write_products,write_translations,read_analytics"
+  ```
+</ParamField>
+
+### Database Configuration
+
+<ParamField path="DATABASE_URL" type="string" required>
+  Connection string for your database. Format varies by database provider.
+  
+  ```bash
+  # SQLite (development only)
+  DATABASE_URL="file:./prisma/data.db"
+  
+  # PostgreSQL
+  DATABASE_URL="postgresql://username:password@host:5432/database?schema=public"
+  
+  # MySQL
+  DATABASE_URL="mysql://username:password@host:3306/database"
+  ```
+  
+  <Warning>
+    Use SQLite only for development. Production deployments require PostgreSQL or MySQL.
+  </Warning>
+</ParamField>
+
+### Application Configuration
+
+<ParamField path="NODE_ENV" type="string" default="development">
+  Application environment mode.
+  
+  ```bash
+  # Development
+  NODE_ENV="development"
+  
+  # Production
+  NODE_ENV="production"
+  
+  # Testing
+  NODE_ENV="test"
+  ```
+</ParamField>
+
+<ParamField path="PORT" type="number" default="3000">
+  Port number for the application server.
+  
+  ```bash
+  PORT=3000
+  ```
+</ParamField>
+
+<ParamField path="FRONTEND_PORT" type="number" default="8002">
+  Port number for the Vite development server (development only).
+  
+  ```bash
+  FRONTEND_PORT=8002
+  ```
+</ParamField>
+
+## Optional Variables
+
+These variables enable additional features or customizations:
+
+### Custom Domain
+
+<ParamField path="SHOP_CUSTOM_DOMAIN" type="string">
+  Custom shop domain if using Shopify Plus with a custom domain.
+  
+  ```bash
+  SHOP_CUSTOM_DOMAIN="shop.yourdomain.com"
+  ```
+</ParamField>
+
+### Application ID
+
+<ParamField path="APP_GID" type="string">
+  Global ID of your Shopify app (format: `gid://shopify/App/12345`).
+  
+  ```bash
+  APP_GID="gid://shopify/App/12345678"
+  ```
+</ParamField>
+
+### Build Information
+
+<ParamField path="GITHUB_SHA" type="string">
+  Git commit hash for deployment tracking and debugging.
+  
+  ```bash
+  GITHUB_SHA="abc123def456"
+  ```
+</ParamField>
+
+### Maintenance Mode
+
+<ParamField path="MAINTENANCE_MODE" type="boolean" default="false">
+  Enable maintenance mode to return 503 responses.
+  
+  ```bash
+  MAINTENANCE_MODE="true"
+  ```
+</ParamField>
+
+### URL Override (Development)
+
+<ParamField path="HOST" type="string">
+  Override for SHOPIFY_APP_URL during development. Automatically converts to SHOPIFY_APP_URL.
+  
+  ```bash
+  HOST="https://example.ngrok-free.app"
+  ```
+  
+  <Warning>
+    This is deprecated. Use SHOPIFY_APP_URL directly instead.
+  </Warning>
+</ParamField>
+
+### Extension Configuration
+
+<ParamField path="APP_URL" type="string">
+  App URL for buyer subscription extensions (used in UI extensions).
+  
+  ```bash
+  APP_URL="https://your-app-domain.com"
+  ```
+</ParamField>
+
+## Environment Files
+
+The app supports environment-specific configuration files:
+
+### Development Environment
+
+Create `.env.development`:
+
+```bash
+SHOPIFY_API_KEY="your_dev_api_key"
+SHOPIFY_API_SECRET="your_dev_api_secret"
+SHOPIFY_APP_URL="https://example.ngrok-free.app"
+SCOPES="customer_read_customers,customer_read_orders,customer_read_own_subscription_contracts,customer_write_customers,customer_write_own_subscription_contracts,read_all_orders,read_locales,read_locations,read_themes,write_customer_payment_methods,write_customers,write_metaobject_definitions,write_metaobjects,write_orders,write_own_subscription_contracts,write_products,write_translations,read_analytics"
+DATABASE_URL="file:./prisma/data.db"
+NODE_ENV="development"
+PORT=3000
+FRONTEND_PORT=8002
+```
+
+### Production Environment
+
+Create `.env.production` or configure via your hosting platform:
+
+```bash
+SHOPIFY_API_KEY="your_prod_api_key"
+SHOPIFY_API_SECRET="your_prod_api_secret"
+SHOPIFY_APP_URL="https://your-app-domain.com"
+SCOPES="customer_read_customers,customer_read_orders,customer_read_own_subscription_contracts,customer_write_customers,customer_write_own_subscription_contracts,read_all_orders,read_locales,read_locations,read_themes,write_customer_payment_methods,write_customers,write_metaobject_definitions,write_metaobjects,write_orders,write_own_subscription_contracts,write_products,write_translations,read_analytics"
+DATABASE_URL="postgresql://username:password@host:5432/database?schema=public"
+NODE_ENV="production"
+PORT=3000
+```
+
+### Test Environment
+
+Create `.env.test` for running tests:
+
+```bash
+SHOPIFY_API_KEY="test_api_key"
+SHOPIFY_API_SECRET="test_api_secret"
+SHOPIFY_APP_URL="http://localhost:3000"
+SCOPES="customer_read_customers,customer_read_orders,customer_read_own_subscription_contracts,customer_write_customers,customer_write_own_subscription_contracts,read_all_orders,read_locales,read_locations,read_themes,write_customer_payment_methods,write_customers,write_metaobject_definitions,write_metaobjects,write_orders,write_own_subscription_contracts,write_products,write_translations,read_analytics"
+NODE_ENV="test"
+```
+
+<Warning>
+  Never commit `.env` files containing real credentials to version control. Add them to `.gitignore`.
+</Warning>
+
+## Loading Environment Variables
+
+The app uses `dotenv-cli` to load environment-specific variables:
+
+```bash
+# Development
+pnpm dev
+# Internally runs: dotenv -c development pnpm shopify app dev
+
+# Testing
+pnpm test
+# Internally runs: dotenv -c test vitest
+```
+
+## Validation
+
+The app validates required environment variables at startup. Missing variables will cause the app to fail with clear error messages.
+
+### Configuration Module
+
+The configuration is centralized in `config/index.ts`:
+
+```typescript
+export const config: Configuration = {
+  environment: process.env.NODE_ENV as NodeEnv,
+  i18n: {
+    debug: isDevelopment,
+  },
+  shopify: {
+    sessionStorage: isTest
+      ? SessionStorageConfig.Memory
+      : SessionStorageConfig.Prisma,
+  },
+  logger: {
+    level: isProduction ? 'info' : 'trace',
+  },
+};
+```
+
+## Platform-Specific Configuration
+
+### Railway
+
+<Steps>
+  <Step title="Create new project">
+    Connect your GitHub repository to Railway.
+  </Step>
+  
+  <Step title="Add environment variables">
+    In the Railway dashboard, add all required variables under the "Variables" tab.
+  </Step>
+  
+  <Step title="Add database service">
+    Railway can automatically provision a PostgreSQL database and set `DATABASE_URL`.
+  </Step>
+</Steps>
+
+### Fly.io
+
+Set secrets using the Fly CLI:
+
+```bash
+flyctl secrets set SHOPIFY_API_KEY="your_api_key"
+flyctl secrets set SHOPIFY_API_SECRET="your_api_secret"
+flyctl secrets set SHOPIFY_APP_URL="https://your-app.fly.dev"
+flyctl secrets set DATABASE_URL="postgresql://..."
+flyctl secrets set SCOPES="customer_read_customers,..."
+```
+
+### Google Cloud Run
+
+Configure via `gcloud` CLI:
+
+```bash
+gcloud run deploy your-app \
+  --set-env-vars SHOPIFY_API_KEY=your_api_key \
+  --set-env-vars SHOPIFY_API_SECRET=your_api_secret \
+  --set-env-vars SHOPIFY_APP_URL=https://your-app-run.app \
+  --set-env-vars DATABASE_URL=postgresql://... \
+  --set-env-vars SCOPES="customer_read_customers,..."
+```
+
+### Vercel
+
+<Steps>
+  <Step title="Add environment variables">
+    In Vercel dashboard, go to Project Settings → Environment Variables.
+  </Step>
+  
+  <Step title="Set variable scope">
+    Configure variables for Production, Preview, and Development environments separately.
+  </Step>
+</Steps>
+
+### Docker
+
+Create a `.env` file and use it with Docker:
+
+```bash
+docker run --env-file .env -p 3000:3000 your-app-image
+```
+
+Or pass variables directly:
+
+```bash
+docker run \
+  -e SHOPIFY_API_KEY=your_api_key \
+  -e SHOPIFY_API_SECRET=your_api_secret \
+  -e SHOPIFY_APP_URL=https://your-domain.com \
+  -e DATABASE_URL=postgresql://... \
+  -e SCOPES="customer_read_customers,..." \
+  -p 3000:3000 \
+  your-app-image
+```
+
+## Security Best Practices
+
+<Warning>
+  Follow these security practices to protect your app:
+</Warning>
+
+<Steps>
+  <Step title="Never commit secrets">
+    Add all `.env*` files to `.gitignore`.
+  </Step>
+  
+  <Step title="Use secret management">
+    Use your platform's secret management service for production credentials.
+  </Step>
+  
+  <Step title="Rotate credentials regularly">
+    Change API secrets periodically and update environment variables.
+  </Step>
+  
+  <Step title="Limit access">
+    Restrict who can view and modify environment variables in production.
+  </Step>
+  
+  <Step title="Use HTTPS only">
+    Always use HTTPS URLs for `SHOPIFY_APP_URL` in production.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Variable Not Loading
+
+<Steps>
+  <Step title="Check file name">
+    Ensure your environment file matches the pattern: `.env`, `.env.development`, `.env.production`, or `.env.test`.
+  </Step>
+  
+  <Step title="Verify syntax">
+    Environment variables should have no spaces around the `=` sign:
+    ```bash
+    # Correct
+    VARIABLE="value"
+    
+    # Incorrect
+    VARIABLE = "value"
+    ```
+  </Step>
+  
+  <Step title="Check for quotes">
+    Use quotes for values with spaces or special characters:
+    ```bash
+    SCOPES="scope1,scope2,scope3"
+    ```
+  </Step>
+</Steps>
+
+### Shopify Authentication Fails
+
+Verify these variables are correctly set:
+- `SHOPIFY_API_KEY` matches your app's Client ID
+- `SHOPIFY_API_SECRET` matches your app's Client Secret
+- `SHOPIFY_APP_URL` is accessible and uses HTTPS
+- `SCOPES` includes all required scopes
+
+### Database Connection Errors
+
+Check `DATABASE_URL` format:
+
+```bash
+# PostgreSQL format
+postgresql://[user]:[password]@[host]:[port]/[database]?schema=[schema]
+
+# MySQL format  
+mysql://[user]:[password]@[host]:[port]/[database]
+```
+
+## Next Steps
+
+<Card title="Deploy to Production" icon="rocket" href="/deployment/production">
+  Learn how to deploy your app to production
+</Card>

@@ -1,0 +1,584 @@
+---
+title: Admin Subscription Action Extension
+description: Merchant-facing extension for creating and managing subscription plans in Shopify Admin
+---
+
+The Admin Subscription Action extension enables merchants to create and manage subscription selling plans directly from the Shopify Admin product and variant pages.
+
+## Extension Configuration
+
+Configured in `shopify.extension.toml`:
+
+```toml
+api_version = "unstable"
+
+[[extensions]]
+name = "t:name"
+handle = "admin-subs-action"
+type = "ui_extension"
+
+[extensions.capabilities]
+api_access = true
+network_access = true
+
+[[extensions.targeting]]
+module = "./src/ProductExtension.tsx"
+target = "admin.product-purchase-option.action.render"
+
+[[extensions.targeting]]
+module = "./src/ProductVariantExtension.tsx"
+target = "admin.product-variant-purchase-option.action.render"
+```
+
+### Extension Targets
+
+The extension renders at two surfaces:
+
+<Tabs>
+  <Tab title="Product Level">
+    **Target**: `admin.product-purchase-option.action.render`
+    
+    Renders in the purchase options section of the product detail page. Allows merchants to create subscription plans that apply to all variants.
+
+    ```tsx
+    import {reactExtension} from '@shopify/ui-extensions-react/admin';
+    import PurchaseOptionsActionExtension from './PurchaseOptionsActionExtension';
+    import AdminExtensionContext from 'foundation/AdminExtensionContext';
+
+    export default reactExtension(
+      'admin.product-purchase-option.action.render',
+      () => (
+        <AdminExtensionContext.Provider value="PRODUCT">
+          <PurchaseOptionsActionExtension />
+        </AdminExtensionContext.Provider>
+      )
+    );
+    ```
+  </Tab>
+  
+  <Tab title="Variant Level">
+    **Target**: `admin.product-variant-purchase-option.action.render`
+    
+    Renders in the purchase options section of individual variant pages. Enables variant-specific subscription plans.
+
+    ```tsx
+    import {reactExtension} from '@shopify/ui-extensions-react/admin';
+    import PurchaseOptionsActionExtension from './PurchaseOptionsActionExtension';
+    import AdminExtensionContext from 'foundation/AdminExtensionContext';
+
+    export default reactExtension(
+      'admin.product-variant-purchase-option.action.render',
+      () => (
+        <AdminExtensionContext.Provider value="PRODUCT_VARIANT">
+          <PurchaseOptionsActionExtension />
+        </AdminExtensionContext.Provider>
+      )
+    );
+    ```
+  </Tab>
+</Tabs>
+
+## Core Component
+
+The main component provides a form for creating and editing subscription plans:
+
+```tsx
+import {
+  AdminAction,
+  BlockStack,
+  Button,
+  TextField,
+  Checkbox,
+  ChoiceList,
+} from '@shopify/ui-extensions-react/admin';
+
+export default function PurchaseOptionsActionExtension() {
+  const {i18n, close, data} = useExtensionApi();
+  const sellingPlanGroupId = data.selected[0]['sellingPlanId'];
+  
+  const [planName, setPlanName] = useState('');
+  const [merchantCode, setMerchantCode] = useState('');
+  const [offerDiscount, setOfferDiscount] = useState(true);
+  const [discountType, setDiscountType] = useState('PERCENTAGE');
+  const [deliveryOptions, setDeliveryOptions] = useState([]);
+
+  async function handleSave() {
+    // Create or update selling plan group
+    if (sellingPlanGroupId) {
+      await updateSellingPlanGroup({...});
+    } else {
+      await createSellingPlanGroup({...});
+    }
+    close();
+  }
+
+  return (
+    <AdminAction
+      primaryAction={<Button onPress={handleSave}>Save</Button>}
+      secondaryAction={<Button onPress={close}>Cancel</Button>}
+    >
+      <BlockStack gap="base">
+        <TextField
+          label="Plan name"
+          value={planName}
+          onChange={setPlanName}
+        />
+        <TextField
+          label="Merchant code"
+          value={merchantCode}
+          onChange={setMerchantCode}
+        />
+        <Checkbox
+          checked={offerDiscount}
+          onChange={setOfferDiscount}
+        >
+          Offer discount
+        </Checkbox>
+        {offerDiscount && (
+          <ChoiceList
+            choices={[
+              {label: 'Percentage off', id: 'PERCENTAGE'},
+              {label: 'Amount off', id: 'AMOUNT'},
+              {label: 'Fixed price', id: 'PRICE'},
+            ]}
+            value={discountType}
+            onChange={setDiscountType}
+          />
+        )}
+        {/* Delivery options */}
+      </BlockStack>
+    </AdminAction>
+  );
+}
+```
+
+## Subscription Plan Configuration
+
+### Plan Name and Merchant Code
+
+```tsx
+<TextField
+  name="planName"
+  label={i18n.translate('planName.label')}
+  helpText={i18n.translate('planName.helpText')}
+  placeholder={i18n.translate('planName.placeholder')}
+  value={planName}
+  onChange={setPlanName}
+  error={errors.planName}
+/>
+
+<TextField
+  name="merchantCode"
+  label={i18n.translate('merchantCode.label')}
+  helpText={i18n.translate('merchantCode.helpText')}
+  value={merchantCode}
+  onChange={setMerchantCode}
+  error={errors.merchantCode}
+/>
+```
+
+### Discount Configuration
+
+<Tabs>
+  <Tab title="Percentage Off">
+    Reduce the price by a percentage:
+    
+    ```tsx
+    {
+      discountType: 'PERCENTAGE',
+      adjustmentValue: 10, // 10% off
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Amount Off">
+    Reduce the price by a fixed amount:
+    
+    ```tsx
+    {
+      discountType: 'AMOUNT',
+      adjustmentValue: 5.00, // $5 off
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Fixed Price">
+    Set a fixed subscription price:
+    
+    ```tsx
+    {
+      discountType: 'PRICE',
+      adjustmentValue: 19.99, // $19.99 per delivery
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Delivery Options
+
+Merchants can add multiple delivery frequency options:
+
+```tsx
+class DeliveryOption {
+  frequency: number;
+  interval: 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
+  discount: number;
+  discountType: 'PERCENTAGE' | 'AMOUNT' | 'PRICE';
+  
+  toSellingPlanInput(currencyCode: string) {
+    return {
+      name: `Every ${this.frequency} ${this.interval.toLowerCase()}(s)`,
+      billingPolicy: {
+        recurring: {
+          interval: this.interval,
+          intervalCount: this.frequency,
+        },
+      },
+      deliveryPolicy: {
+        recurring: {
+          interval: this.interval,
+          intervalCount: this.frequency,
+        },
+      },
+      pricingPolicies: this.discount ? [{
+        recurring: {
+          adjustmentType: this.discountType,
+          adjustmentValue: {
+            [this.discountType === 'PERCENTAGE' ? 'percentage' : 'fixedAmount']: 
+              this.discountType === 'PERCENTAGE' 
+                ? this.discount 
+                : {amount: this.discount, currencyCode},
+          },
+        },
+      }] : [],
+    };
+  }
+}
+```
+
+## GraphQL Mutations
+
+### Create Selling Plan Group
+
+```graphql
+mutation CreateSellingPlanGroup(
+  $input: SellingPlanGroupInput!
+  $resources: SellingPlanGroupResourceInput!
+) {
+  sellingPlanGroupCreate(
+    input: $input
+    resources: $resources
+  ) {
+    sellingPlanGroup {
+      id
+      name
+      merchantCode
+      sellingPlans(first: 10) {
+        edges {
+          node {
+            id
+            name
+            billingPolicy {
+              ... on SellingPlanRecurringBillingPolicy {
+                interval
+                intervalCount
+              }
+            }
+            deliveryPolicy {
+              ... on SellingPlanRecurringDeliveryPolicy {
+                interval
+                intervalCount
+              }
+            }
+            pricingPolicies {
+              ... on SellingPlanRecurringPricingPolicy {
+                adjustmentType
+                adjustmentValue {
+                  ... on SellingPlanPricingPolicyPercentageValue {
+                    percentage
+                  }
+                  ... on MoneyV2 {
+                    amount
+                    currencyCode
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### Update Selling Plan Group
+
+```graphql
+mutation UpdateSellingPlanGroup(
+  $id: ID!
+  $input: SellingPlanGroupInput!
+) {
+  sellingPlanGroupUpdate(
+    id: $id
+    input: $input
+  ) {
+    sellingPlanGroup {
+      id
+      name
+      merchantCode
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+## Custom Hooks
+
+### useSellingPlanGroupDetails
+
+Fetches existing selling plan group data for editing:
+
+```typescript
+export function useSellingPlanGroupDetails({id}: {id?: string}) {
+  const {graphql} = useExtensionApi();
+  
+  const {data, loading} = graphql(
+    SellingPlanGroupDetailsQuery,
+    {
+      variables: {id},
+      skip: !id,
+    }
+  );
+  
+  return {
+    sellingPlanGroup: data?.sellingPlanGroup,
+    loading,
+  };
+}
+```
+
+### useCreateSellingPlanGroup
+
+Creates a new selling plan group:
+
+```typescript
+export function useCreateSellingPlanGroup() {
+  const {graphql} = useExtensionApi();
+  
+  const [createMutation, {loading}] = graphql(
+    CreateSellingPlanGroupMutation
+  );
+  
+  async function createSellingPlanGroup({input, resources}) {
+    const {data, errors} = await createMutation({
+      variables: {input, resources},
+    });
+    
+    return {data, errors};
+  }
+  
+  return {
+    createSellingPlanGroup,
+    graphqlLoading: loading,
+  };
+}
+```
+
+### useUpdateSellingPlanGroup
+
+Updates an existing selling plan group:
+
+```typescript
+export function useUpdateSellingPlanGroup() {
+  const {graphql} = useExtensionApi();
+  
+  const [updateMutation, {loading}] = graphql(
+    UpdateSellingPlanGroupMutation
+  );
+  
+  async function updateSellingPlanGroup({id, input}) {
+    const {data, errors} = await updateMutation({
+      variables: {id, input},
+    });
+    
+    return {data, errors};
+  }
+  
+  return {
+    updateSellingPlanGroup,
+    graphqlLoading: loading,
+  };
+}
+```
+
+## Validation
+
+The extension uses Zod for input validation:
+
+```typescript
+import {z} from 'zod';
+
+export function getExtensionSellingPlanGroupValidator(translate) {
+  return z.object({
+    planName: z.string().min(1, translate('errors.planNameRequired')),
+    merchantCode: z.string().min(1, translate('errors.merchantCodeRequired')),
+    deliveryOptions: z.array(
+      z.object({
+        frequency: z.number().min(1),
+        interval: z.enum(['DAY', 'WEEK', 'MONTH', 'YEAR']),
+        discount: z.number().optional(),
+      })
+    ).min(1, translate('errors.deliveryOptionsRequired')),
+  });
+}
+```
+
+## Delivery Option Item Component
+
+Displays individual delivery frequency options:
+
+```tsx
+export function DeliveryOptionItem({
+  index,
+  option,
+  offerDiscount,
+  discountType,
+  updateDeliveryOption,
+  removeDeliveryOption,
+}) {
+  return (
+    <Card>
+      <BlockStack gap="base">
+        <InlineStack gap="small">
+          <TextField
+            label="Frequency"
+            type="number"
+            value={option.frequency}
+            onChange={(value) => 
+              updateDeliveryOption('frequency', value)
+            }
+          />
+          <Select
+            label="Interval"
+            options={[
+              {label: 'Days', value: 'DAY'},
+              {label: 'Weeks', value: 'WEEK'},
+              {label: 'Months', value: 'MONTH'},
+              {label: 'Years', value: 'YEAR'},
+            ]}
+            value={option.interval}
+            onChange={(value) => 
+              updateDeliveryOption('interval', value)
+            }
+          />
+        </InlineStack>
+        {offerDiscount && (
+          <TextField
+            label={`Discount (${discountType})`}
+            type="number"
+            value={option.discount}
+            onChange={(value) => 
+              updateDeliveryOption('discount', value)
+            }
+          />
+        )}
+        {removeDeliveryOption && (
+          <Button onPress={removeDeliveryOption} destructive>
+            Remove
+          </Button>
+        )}
+      </BlockStack>
+    </Card>
+  );
+}
+```
+
+## Error Handling
+
+```tsx
+{errors.length > 0 ? (
+  <Banner tone="critical">
+    <BlockStack gap="small">
+      {errors.map((error, index) => (
+        <Box key={index}>{error.message}</Box>
+      ))}
+    </BlockStack>
+  </Banner>
+) : null}
+```
+
+## Loading States
+
+```tsx
+if (graphqlLoading) {
+  return (
+    <BlockStack inlineAlignment="center">
+      <ProgressIndicator size="large-300" />
+    </BlockStack>
+  );
+}
+```
+
+## Testing
+
+```typescript
+describe('PurchaseOptionsActionExtension', () => {
+  it('creates a new selling plan group', async () => {
+    const {getByText, getByLabelText} = render(
+      <PurchaseOptionsActionExtension />
+    );
+    
+    fireEvent.change(getByLabelText('Plan name'), {
+      target: {value: 'Monthly Subscription'},
+    });
+    
+    fireEvent.click(getByText('Save'));
+    
+    expect(createMutation).toHaveBeenCalledWith({
+      variables: expect.objectContaining({
+        input: expect.objectContaining({
+          name: 'Monthly Subscription',
+        }),
+      }),
+    });
+  });
+});
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Plan Organization">
+    Use descriptive plan names and merchant codes for easy identification. Consider using a naming convention like "MONTHLY-10" for a monthly plan with 10% discount.
+  </Accordion>
+  
+  <Accordion title="Discount Strategy">
+    Offer multiple discount tiers to incentivize longer commitments. For example:
+    - Weekly: 5% off
+    - Bi-weekly: 10% off
+    - Monthly: 15% off
+  </Accordion>
+  
+  <Accordion title="Validation">
+    Always validate input before submission. Ensure frequency values are positive integers and discount percentages are between 0-100.
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Admin UI Extensions" href="https://shopify.dev/docs/api/admin-extensions" icon="book">
+    Official Shopify documentation for admin extensions
+  </Card>
+  <Card title="Selling Plans API" href="https://shopify.dev/docs/api/admin-graphql/latest/mutations/sellingPlanGroupCreate" icon="code">
+    GraphQL API reference for selling plans
+  </Card>
+</CardGroup>

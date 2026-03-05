@@ -1,0 +1,417 @@
+---
+title: Database Setup
+description: Configure your database and run Prisma migrations for the Shopify Subscriptions Reference App
+---
+
+## Overview
+
+The Shopify Subscriptions Reference App uses Prisma as its ORM and supports SQLite for development and PostgreSQL or MySQL for production.
+
+## Database Schema
+
+The app uses three main database tables:
+
+### Session Table
+
+Stores Shopify OAuth session data for both online and offline tokens.
+
+```prisma
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+}
+```
+
+### BillingSchedule Table
+
+Manages billing schedules for subscription processing.
+
+```prisma
+model BillingSchedule {
+  id        Int      @id @default(autoincrement())
+  shop      String   @unique
+  hour      Int      @default(10)
+  timezone  String   @default("America/Toronto")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+```
+
+### DunningTracker Table
+
+Tracks failed billing attempts and dunning management.
+
+```prisma
+model DunningTracker {
+  id                Int       @id @default(autoincrement())
+  shop              String
+  contractId        String
+  billingCycleIndex Int
+  failureReason     String
+  completedAt       DateTime?
+  completedReason   String?
+
+  @@unique([shop, contractId, billingCycleIndex, failureReason], name: "uniqueBillingCycleFailure")
+  @@index([completedAt])
+}
+```
+
+## Development Setup (SQLite)
+
+For local development, the app uses SQLite by default.
+
+<Steps>
+  <Step title="Verify Prisma schema">
+    The default configuration in `prisma/schema.prisma`:
+    
+    ```prisma
+    datasource db {
+      provider = "sqlite"
+      url      = "file:./data.db"
+    }
+    ```
+  </Step>
+  
+  <Step title="Generate Prisma client">
+    ```bash
+    pnpm prisma generate
+    ```
+  </Step>
+  
+  <Step title="Run migrations">
+    ```bash
+    pnpm prisma migrate deploy
+    ```
+    
+    Or use the setup script:
+    ```bash
+    pnpm setup
+    ```
+  </Step>
+  
+  <Step title="Verify database">
+    ```bash
+    pnpm prisma studio
+    ```
+    Opens a browser-based database GUI at `http://localhost:5555`
+  </Step>
+</Steps>
+
+<Warning>
+  SQLite stores data in a local file (`prisma/data.db`). This is suitable for development only and should not be used in production.
+</Warning>
+
+## Production Setup (PostgreSQL)
+
+For production deployments, use PostgreSQL or MySQL.
+
+### PostgreSQL Configuration
+
+<Steps>
+  <Step title="Update datasource configuration">
+    Modify `prisma/schema.prisma`:
+    
+    ```prisma
+    datasource db {
+      provider = "postgresql"
+      url      = env("DATABASE_URL")
+    }
+    ```
+  </Step>
+  
+  <Step title="Set DATABASE_URL environment variable">
+    ```bash
+    DATABASE_URL="postgresql://username:password@host:5432/database?schema=public"
+    ```
+    
+    Connection string format:
+    ```
+    postgresql://[user]:[password]@[host]:[port]/[database]?schema=[schema]
+    ```
+  </Step>
+  
+  <Step title="Generate Prisma client">
+    ```bash
+    pnpm prisma generate
+    ```
+  </Step>
+  
+  <Step title="Deploy migrations">
+    ```bash
+    pnpm db:migrate
+    ```
+    
+    This runs `prisma migrate deploy` which applies all pending migrations.
+  </Step>
+</Steps>
+
+### MySQL Configuration
+
+<Steps>
+  <Step title="Update datasource configuration">
+    Modify `prisma/schema.prisma`:
+    
+    ```prisma
+    datasource db {
+      provider = "mysql"
+      url      = env("DATABASE_URL")
+    }
+    ```
+  </Step>
+  
+  <Step title="Set DATABASE_URL environment variable">
+    ```bash
+    DATABASE_URL="mysql://username:password@host:3306/database"
+    ```
+  </Step>
+  
+  <Step title="Deploy migrations">
+    ```bash
+    pnpm db:migrate
+    ```
+  </Step>
+</Steps>
+
+## Migration SQL
+
+The initial migration creates all required tables:
+
+```sql
+-- CreateTable
+CREATE TABLE "Session" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "shop" TEXT NOT NULL,
+    "state" TEXT NOT NULL,
+    "isOnline" BOOLEAN NOT NULL DEFAULT false,
+    "scope" TEXT,
+    "expires" DATETIME,
+    "accessToken" TEXT NOT NULL,
+    "userId" BIGINT,
+    "firstName" TEXT,
+    "lastName" TEXT,
+    "email" TEXT,
+    "accountOwner" BOOLEAN NOT NULL DEFAULT false,
+    "locale" TEXT,
+    "collaborator" BOOLEAN DEFAULT false,
+    "emailVerified" BOOLEAN DEFAULT false
+);
+
+-- CreateTable
+CREATE TABLE "BillingSchedule" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "shop" TEXT NOT NULL,
+    "hour" INTEGER NOT NULL DEFAULT 10,
+    "timezone" TEXT NOT NULL DEFAULT 'America/Toronto',
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "DunningTracker" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "shop" TEXT NOT NULL,
+    "contractId" TEXT NOT NULL,
+    "billingCycleIndex" INTEGER NOT NULL,
+    "failureReason" TEXT NOT NULL,
+    "completedAt" DATETIME,
+    "completedReason" TEXT
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "BillingSchedule_shop_key" ON "BillingSchedule"("shop");
+
+-- CreateIndex
+CREATE INDEX "DunningTracker_completedAt_idx" ON "DunningTracker"("completedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "DunningTracker_shop_contractId_billingCycleIndex_failureReason_key" 
+ON "DunningTracker"("shop", "contractId", "billingCycleIndex", "failureReason");
+```
+
+## Managed Database Providers
+
+<CardGroup cols={2}>
+  <Card title="Supabase" icon="database">
+    PostgreSQL with automatic backups and scaling
+    ```bash
+    DATABASE_URL="postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres"
+    ```
+  </Card>
+  
+  <Card title="PlanetScale" icon="planet">
+    MySQL-compatible serverless database
+    ```bash
+    DATABASE_URL="mysql://[username]:[password]@[host]/[database]?sslaccept=strict"
+    ```
+  </Card>
+  
+  <Card title="Railway" icon="train">
+    PostgreSQL with automatic provisioning
+    ```bash
+    DATABASE_URL="postgresql://postgres:[password]@[region].railway.app:5432/railway"
+    ```
+  </Card>
+  
+  <Card title="Google Cloud SQL" icon="google">
+    Fully managed PostgreSQL or MySQL
+    ```bash
+    DATABASE_URL="postgresql://[user]:[password]@[ip]:5432/[database]"
+    ```
+  </Card>
+</CardGroup>
+
+## Connection Pooling
+
+For production deployments, enable connection pooling to handle multiple concurrent requests efficiently.
+
+### Prisma Data Proxy
+
+```bash
+DATABASE_URL="prisma://aws-us-east-1.prisma-data.com/?api_key=[key]"
+```
+
+### PgBouncer (PostgreSQL)
+
+```bash
+DATABASE_URL="postgresql://user:password@host:6543/database?pgbouncer=true"
+```
+
+<Warning>
+  When using connection poolers, you may need to adjust Prisma settings:
+  ```prisma
+  generator client {
+    provider = "prisma-client-js"
+    previewFeatures = ["tracing"]
+  }
+  ```
+</Warning>
+
+## Session Storage Configuration
+
+The app supports two session storage modes:
+
+### Prisma Session Storage (Production)
+
+```typescript
+import { PrismaSessionStorage } from '@shopify/shopify-app-session-storage-prisma';
+
+const shopify = shopifyApp({
+  sessionStorage: new PrismaSessionStorage(prisma),
+  // ... other config
+});
+```
+
+### Memory Session Storage (Testing)
+
+```typescript
+import { MemorySessionStorage } from '@shopify/shopify-app-session-storage-memory';
+
+const shopify = shopifyApp({
+  sessionStorage: new MemorySessionStorage(),
+  // ... other config
+});
+```
+
+<Warning>
+  Memory session storage is only for testing. All sessions are lost when the app restarts. Always use Prisma session storage in production.
+</Warning>
+
+## Database Maintenance
+
+### Backup Strategy
+
+<Steps>
+  <Step title="Automated backups">
+    Configure daily automated backups with your database provider.
+  </Step>
+  
+  <Step title="Manual backup">
+    For PostgreSQL:
+    ```bash
+    pg_dump -h host -U username -d database > backup.sql
+    ```
+  </Step>
+  
+  <Step title="Test restoration">
+    Regularly test your backup restoration process.
+  </Step>
+</Steps>
+
+### Monitoring
+
+Monitor these database metrics:
+
+- Connection pool utilization
+- Query performance (slow queries)
+- Storage usage
+- Replication lag (if applicable)
+
+## Troubleshooting
+
+### Migration Errors
+
+If migrations fail:
+
+```bash
+# Reset database (CAUTION: deletes all data)
+pnpm prisma migrate reset
+
+# Resolve migration issues
+pnpm prisma migrate resolve
+
+# Deploy pending migrations
+pnpm prisma migrate deploy
+```
+
+### Connection Issues
+
+<Steps>
+  <Step title="Verify DATABASE_URL">
+    ```bash
+    echo $DATABASE_URL
+    ```
+  </Step>
+  
+  <Step title="Test connection">
+    ```bash
+    pnpm prisma db pull
+    ```
+  </Step>
+  
+  <Step title="Check firewall rules">
+    Ensure your database allows connections from your deployment IP addresses.
+  </Step>
+</Steps>
+
+### Session Table Full
+
+Clean up expired sessions regularly:
+
+```sql
+DELETE FROM "Session" WHERE "expires" < NOW();
+```
+
+<Warning>
+  Implement a cron job or scheduled task to clean up expired sessions automatically.
+</Warning>
+
+## Next Steps
+
+<Card title="Configure Environment Variables" icon="gear" href="/deployment/environment-variables">
+  Set up required environment variables for your deployment
+</Card>

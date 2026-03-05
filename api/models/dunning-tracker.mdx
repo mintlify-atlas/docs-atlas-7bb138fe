@@ -1,0 +1,371 @@
+---
+title: 'DunningTracker Model'
+description: 'API reference for tracking failed billing attempts and dunning management'
+---
+
+# DunningTracker Model
+
+The DunningTracker model tracks failed billing attempts for subscription contracts, enabling retry logic and dunning management workflows.
+
+## Database Schema
+
+```prisma
+model DunningTracker {
+  id                Int       @id @default(autoincrement())
+  shop              String
+  contractId        String
+  billingCycleIndex Int
+  failureReason     String
+  completedAt       DateTime?
+  completedReason   String?
+
+  @@unique([shop, contractId, billingCycleIndex, failureReason], name: "uniqueBillingCycleFailure")
+  @@index([completedAt])
+}
+```
+
+**Unique Constraint:**
+
+The `uniqueBillingCycleFailure` constraint ensures that each combination of shop, contract, billing cycle, and failure reason is tracked only once. This prevents duplicate tracking of the same failure.
+
+**Indexed Fields:**
+
+- `completedAt` - Optimized for queries filtering on completion status
+
+## Functions
+
+### findOrCreateBy
+
+Finds or creates a dunning tracker record for a specific billing failure.
+
+```typescript
+export async function findOrCreateBy({
+  shop,
+  contractId,
+  billingCycleIndex,
+  failureReason,
+}: UpsertArgs): Promise<DunningTracker>
+```
+
+<ParamField path="shop" type="string" required>
+  Shop domain (e.g., "mystore.myshopify.com")
+</ParamField>
+
+<ParamField path="contractId" type="string" required>
+  Global ID of the subscription contract
+</ParamField>
+
+<ParamField path="billingCycleIndex" type="number" required>
+  Index of the billing cycle that failed (0-based)
+</ParamField>
+
+<ParamField path="failureReason" type="string" required>
+  Reason code for the billing failure (e.g., "PAYMENT_FAILED", "INSUFFICIENT_INVENTORY")
+</ParamField>
+
+<ResponseField name="return" type="DunningTracker">
+  The found or newly created dunning tracker record
+  
+  <Expandable title="DunningTracker properties">
+    <ResponseField name="id" type="number">
+      Auto-incremented primary key
+    </ResponseField>
+    <ResponseField name="shop" type="string">
+      Shop domain
+    </ResponseField>
+    <ResponseField name="contractId" type="string">
+      Subscription contract global ID
+    </ResponseField>
+    <ResponseField name="billingCycleIndex" type="number">
+      The billing cycle index that failed
+    </ResponseField>
+    <ResponseField name="failureReason" type="string">
+      The reason for the billing failure
+    </ResponseField>
+    <ResponseField name="completedAt" type="Date | null">
+      Timestamp when the dunning process was completed (null if still in progress)
+    </ResponseField>
+    <ResponseField name="completedReason" type="string | null">
+      Reason why the dunning process was completed
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { findOrCreateBy } from '~/models/DunningTracker/DunningTracker.server';
+
+// Track a failed billing attempt
+const tracker = await findOrCreateBy({
+  shop: 'mystore.myshopify.com',
+  contractId: 'gid://shopify/SubscriptionContract/123',
+  billingCycleIndex: 5,
+  failureReason: 'PAYMENT_FAILED',
+});
+
+console.log(`Tracker ID: ${tracker.id}`);
+console.log(`Completed: ${tracker.completedAt ? 'Yes' : 'No'}`);
+```
+
+**Behavior:**
+
+- If a tracker with the same unique constraint already exists, it returns the existing record
+- If no tracker exists, it creates a new one
+- Uses Prisma's `upsert` operation with an empty `update` object
+- The `completedAt` field is initially `null`
+
+---
+
+### markCompleted
+
+Marks a dunning tracker as completed with the current UTC timestamp.
+
+```typescript
+export async function markCompleted(
+  tracker: DunningTracker,
+): Promise<void>
+```
+
+<ParamField path="tracker" type="DunningTracker" required>
+  The dunning tracker record to mark as completed
+</ParamField>
+
+**Example:**
+
+```typescript
+import { findOrCreateBy, markCompleted } from '~/models/DunningTracker/DunningTracker.server';
+
+// Track and then complete a dunning process
+const tracker = await findOrCreateBy({
+  shop: 'mystore.myshopify.com',
+  contractId: 'gid://shopify/SubscriptionContract/123',
+  billingCycleIndex: 5,
+  failureReason: 'PAYMENT_FAILED',
+});
+
+// ... perform retry logic ...
+
+if (retrySucceeded) {
+  await markCompleted(tracker);
+  console.log('Dunning process completed successfully');
+}
+```
+
+**Behavior:**
+
+- Sets the `completedAt` field to the current UTC time using Luxon
+- Uses `DateTime.utc().toJSDate()` for timestamp generation
+- Throws an error if timestamp generation fails
+- Once completed, the tracker is filtered out of active dunning queries
+
+## Type Definitions
+
+### DunningTracker
+
+```typescript
+interface DunningTracker {
+  id: number;
+  shop: string;
+  contractId: string;
+  billingCycleIndex: number;
+  failureReason: string;
+  completedAt: Date | null;
+  completedReason: string | null;
+}
+```
+
+### UpsertArgs
+
+```typescript
+interface UpsertArgs {
+  shop: string;
+  contractId: string;
+  billingCycleIndex: number;
+  failureReason: string;
+}
+```
+
+## Usage Patterns
+
+### Tracking Failed Billing Attempts
+
+```typescript
+import { findOrCreateBy } from '~/models/DunningTracker/DunningTracker.server';
+import { findSubscriptionContractWithBillingCycle } from '~/models/SubscriptionContract/SubscriptionContract.server';
+
+export async function handleBillingFailure({
+  shop,
+  contractId,
+  billingCycleIndex,
+}: {
+  shop: string;
+  contractId: string;
+  billingCycleIndex: number;
+}) {
+  const { subscriptionBillingCycle } =
+    await findSubscriptionContractWithBillingCycle({
+      shop,
+      contractId,
+      date: getCurrentBillingDate(),
+    });
+
+  const billingAttempts = subscriptionBillingCycle.billingAttempts.edges;
+  const latestAttempt = billingAttempts[0]?.node;
+
+  if (latestAttempt?.errorCode) {
+    const tracker = await findOrCreateBy({
+      shop,
+      contractId,
+      billingCycleIndex,
+      failureReason: latestAttempt.errorCode,
+    });
+
+    // Initiate dunning workflow
+    await initiateRetryLogic(tracker);
+  }
+}
+```
+
+### Finding Active Dunning Records
+
+```typescript
+import prisma from '~/db.server';
+
+// Find all incomplete dunning trackers for a shop
+export async function getActiveDunningTrackers(shop: string) {
+  return await prisma.dunningTracker.findMany({
+    where: {
+      shop,
+      completedAt: null,
+    },
+    orderBy: {
+      id: 'asc',
+    },
+  });
+}
+```
+
+### Completing Dunning After Successful Retry
+
+```typescript
+import { markCompleted } from '~/models/DunningTracker/DunningTracker.server';
+import prisma from '~/db.server';
+
+export async function handleSuccessfulRetry({
+  shop,
+  contractId,
+  billingCycleIndex,
+  failureReason,
+}: {
+  shop: string;
+  contractId: string;
+  billingCycleIndex: number;
+  failureReason: string;
+}) {
+  const tracker = await prisma.dunningTracker.findUnique({
+    where: {
+      uniqueBillingCycleFailure: {
+        shop,
+        contractId,
+        billingCycleIndex,
+        failureReason,
+      },
+    },
+  });
+
+  if (tracker && !tracker.completedAt) {
+    await markCompleted(tracker);
+    console.log(`Dunning completed for contract ${contractId}`);
+  }
+}
+```
+
+### Querying Dunning Statistics
+
+```typescript
+import prisma from '~/db.server';
+import { DateTime } from 'luxon';
+
+// Get dunning statistics for the last 30 days
+export async function getDunningStats(shop: string) {
+  const thirtyDaysAgo = DateTime.now().minus({ days: 30 }).toJSDate();
+
+  const totalTrackers = await prisma.dunningTracker.count({
+    where: {
+      shop,
+      createdAt: { gte: thirtyDaysAgo },
+    },
+  });
+
+  const completedTrackers = await prisma.dunningTracker.count({
+    where: {
+      shop,
+      completedAt: { not: null },
+      createdAt: { gte: thirtyDaysAgo },
+    },
+  });
+
+  const activeTrackers = await prisma.dunningTracker.count({
+    where: {
+      shop,
+      completedAt: null,
+      createdAt: { gte: thirtyDaysAgo },
+    },
+  });
+
+  return {
+    total: totalTrackers,
+    completed: completedTrackers,
+    active: activeTrackers,
+    successRate: totalTrackers > 0 ? (completedTrackers / totalTrackers) * 100 : 0,
+  };
+}
+```
+
+### Grouping by Failure Reason
+
+```typescript
+import prisma from '~/db.server';
+
+// Get failure reasons distribution
+export async function getFailureReasonDistribution(shop: string) {
+  const trackers = await prisma.dunningTracker.groupBy({
+    by: ['failureReason'],
+    where: {
+      shop,
+      completedAt: null,
+    },
+    _count: {
+      failureReason: true,
+    },
+  });
+
+  return trackers.map((tracker) => ({
+    reason: tracker.failureReason,
+    count: tracker._count.failureReason,
+  }));
+}
+```
+
+## Common Failure Reasons
+
+- `PAYMENT_FAILED` - Payment method declined or failed
+- `INSUFFICIENT_INVENTORY` - Not enough inventory to fulfill the order
+- `CUSTOMER_ERROR` - Customer-related issues (invalid address, etc.)
+- `PAYMENT_METHOD_REVOKED` - Payment method was removed or expired
+- `INVENTORY_ERROR` - Inventory allocation failed
+
+## Best Practices
+
+1. **Always check for existing trackers** before creating new ones to avoid race conditions
+2. **Mark trackers as completed** once the dunning process is finished (successful or not)
+3. **Use the unique constraint** to prevent duplicate tracking of the same failure
+4. **Query by `completedAt: null`** to find active dunning processes
+5. **Index queries on `completedAt`** for better performance on large datasets
+
+## Related
+
+- [SubscriptionContract Model](/api/models/subscription-contract)
+- [BillingSchedule Model](/api/models/billing-schedule)
+- [Dunning Service Documentation](/services/dunning)

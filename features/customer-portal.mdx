@@ -1,0 +1,554 @@
+---
+title: Customer Portal
+description: Customer-facing subscription management interface with pause, cancel, skip, and edit capabilities
+---
+
+The customer portal is a Shopify Customer Account UI extension that enables customers to view and manage their subscriptions directly from their account dashboard.
+
+## Overview
+
+<CardGroup cols={2}>
+  <Card title="Subscription List" icon="list" href="#subscription-list">
+    View all active and paused subscriptions
+  </Card>
+  <Card title="Subscription Details" icon="magnifying-glass" href="#subscription-details">
+    Detailed view with management actions
+  </Card>
+  <Card title="Self-Service Actions" icon="user-gear" href="#customer-actions">
+    Pause, resume, cancel, and skip orders
+  </Card>
+  <Card title="Multi-Language" icon="language" href="#localization">
+    Support for 30+ languages
+  </Card>
+</CardGroup>
+
+## Extension Configuration
+
+The buyer-subscriptions extension is configured in `shopify.extension.toml`:
+
+```toml
+api_version = "2025-01"
+
+[[extensions]]
+type = "ui_extension"
+name = "Management page"
+handle = "buyer-subscriptions"
+
+  [[extensions.targeting]]
+  module = "./src/index.tsx"
+  target = "customer-account.page.render"
+
+  [extensions.capabilities]
+  api_access = true
+  network_access = true
+```
+
+### Extension Capabilities
+
+<ParamField path="api_access" type="boolean" default="true">
+  Enables GraphQL API access for subscription queries and mutations
+</ParamField>
+
+<ParamField path="network_access" type="boolean" default="true">
+  Allows network requests to the app backend
+</ParamField>
+
+<ParamField path="target" type="string" required>
+  `customer-account.page.render` - Renders as a customer account page
+</ParamField>
+
+## Subscription List
+
+The subscription list displays all customer subscriptions in a responsive grid layout.
+
+### Implementation
+
+```tsx
+import {SubscriptionList} from './SubscriptionList';
+
+export function Router() {
+  const currentEntry = useNavigationCurrentEntry();
+  const url = new URL(currentEntry.url);
+
+  if (url.pathname.includes('subscriptions')) {
+    const id = getSubscriptionIdFromPath(url.pathname);
+    return <SubscriptionDetails id={id} />;
+  }
+  
+  return <SubscriptionList />;
+}
+```
+
+### List Features
+
+<Tabs>
+  <Tab title="Responsive Grid">
+    Adapts to different screen sizes:
+
+    ```tsx
+    <Grid
+      columns={Style.default(['fill'])
+        .when({viewportInlineSize: {min: 'small'}}, ['fill', 'fill'])
+        .when({viewportInlineSize: {min: 'medium'}}, [
+          'fill',
+          'fill',
+          'fill',
+        ])}
+      spacing="loose"
+      rows="auto"
+    >
+      {listItems}
+    </Grid>
+    ```
+  </Tab>
+
+  <Tab title="Loading State">
+    Skeleton UI during data fetching:
+
+    ```tsx
+    <SubscriptionListLoadingState />
+    // Displays:
+    // - Skeleton text blocks
+    // - Skeleton images
+    // - Loading page indicator
+    ```
+  </Tab>
+
+  <Tab title="Empty State">
+    Friendly message when no subscriptions exist:
+
+    ```tsx
+    <SubscriptionListEmptyState />
+    ```
+  </Tab>
+
+  <Tab title="Error State">
+    Error banner for failed queries:
+
+    ```tsx
+    <Banner status="critical">
+      {i18n.translate('subscriptionList.fetchError')}
+    </Banner>
+    ```
+  </Tab>
+</Tabs>
+
+### Data Loading
+
+The list uses the `useSubscriptionListData` hook:
+
+```tsx
+const {data, loading, error, refetchSubscriptionListData} =
+  useSubscriptionListData();
+
+// Data structure:
+data?.subscriptionContracts.map(contract => ({
+  id,
+  status,
+  lines,
+  upcomingBillingCycles,
+  deliveryPolicy,
+  totalQuantity,
+  lastOrderPrice,
+  priceBreakdownEstimate,
+  lastBillingAttemptErrorType,
+}))
+```
+
+## Subscription Details
+
+Detailed view showing subscription information and management options.
+
+### Component Structure
+
+```tsx
+<SubscriptionDetails id={subscriptionContractId} />
+```
+
+**Key sections:**
+
+<Steps>
+  <Step title="Page Header">
+    Title, back button, and primary action menu
+  </Step>
+  
+  <Step title="Upcoming Order Card">
+    Next billing date, skip options, and order preview
+  </Step>
+  
+  <Step title="Overview Card">
+    Delivery frequency, shipping address, and status
+  </Step>
+  
+  <Step title="Price Summary">
+    Itemized pricing with subtotal, shipping, and taxes
+  </Step>
+  
+  <Step title="Past Orders">
+    History of fulfilled subscription orders
+  </Step>
+</Steps>
+
+### Responsive Layout
+
+```tsx
+<Grid
+  columns={Style.default(['fill'])
+    .when({viewportInlineSize: {min: 'medium'}}, ['fill', 'fill'])
+    .when({viewportInlineSize: {min: 'large'}}, [
+      'fill', 'fill', 'fill', 'fill', 'fill', 'fill',
+      'fill', 'fill', 'fill', 'fill', 'fill', 'fill',
+    ])}
+  rows="auto"
+  spacing={['loose', 'loose']}
+>
+  <GridItem columnSpan={Style.default(1).when(
+    {viewportInlineSize: {min: 'large'}}, 7
+  )}>
+    <UpcomingOrderCard />
+  </GridItem>
+  
+  <GridItem columnSpan={Style.default(1).when(
+    {viewportInlineSize: {min: 'large'}}, 5
+  )}>
+    <PriceSummaryCard />
+    <PastOrdersCard />
+  </GridItem>
+</Grid>
+```
+
+## Customer Actions
+
+Self-service actions available to customers through modal dialogs.
+
+### Pause Subscription
+
+<CodeGroup>
+```tsx Modal Component
+import {PauseSubscriptionModal} from '~/components/PauseSubscriptionModal';
+
+<PauseSubscriptionModal
+  contractId={contractId}
+  onPauseSubscription={handlePause}
+/>
+```
+
+```tsx Implementation
+async function handlePauseSubscription() {
+  setLoading(true);
+  const result = await pauseSubscriptionContract(
+    PauseSubscriptionContractMutation,
+    {
+      subscriptionContractId: contractId,
+    },
+  );
+
+  if (result?.subscriptionContractPause?.contract?.status !== 'PAUSED') {
+    setError(true);
+    if (result?.subscriptionContractPause?.userErrors?.length) {
+      setErrorMessage(
+        result?.subscriptionContractPause?.userErrors[0].message,
+      );
+    }
+    setLoading(false);
+    return;
+  }
+
+  onPauseSubscription();
+  sendRequest({contractId, operationName: 'PAUSE'});
+}
+```
+
+```graphql Mutation
+mutation PauseSubscriptionContract($subscriptionContractId: ID!) {
+  subscriptionContractPause(
+    subscriptionContractId: $subscriptionContractId
+  ) {
+    contract {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+</CodeGroup>
+
+### Resume Subscription
+
+```tsx
+import {ResumeSubscriptionModal} from '~/components/ResumeSubscriptionModal';
+
+<ResumeSubscriptionModal
+  contractId={contractId}
+  onResumeSubscription={() => {
+    showSuccessToast(SuccessToastType.Resumed);
+    refetchSubscriptionContract();
+  }}
+/>
+```
+
+**Resume Flow:**
+1. Customer clicks "Resume" in details actions
+2. Modal opens with confirmation message
+3. `subscriptionContractActivate` mutation executes
+4. Status validates as `ACTIVE`
+5. Success toast displays
+6. Subscription data refetches
+
+### Cancel Subscription
+
+```tsx
+import {CancelSubscriptionModal} from '~/components/CancelSubscriptionModal';
+
+<CancelSubscriptionModal
+  contractId={contractId}
+  onCancelSubscription={() => {
+    showSuccessToast(SuccessToastType.Cancelled);
+    navigate('extension:/');
+  }}
+/>
+```
+
+<Warning>
+Cancellation is permanent. The modal includes a confirmation step to prevent accidental cancellations.
+</Warning>
+
+### Skip Next Order
+
+```tsx
+import {SkipNextOrderModal} from '~/components/SkipNextOrderModal';
+
+<SkipNextOrderModal
+  contractId={contractId}
+  cycleIndexToSkip={nextBillingCycle.cycleIndex}
+  resumeDate={nextBillingCycle.billingAttemptExpectedDate}
+  onSkipOrder={() => {
+    showSuccessToast(SuccessToastType.Skipped);
+    refetchSubscriptionContract();
+  }}
+/>
+```
+
+**Skip Features:**
+- Shows resume date after skipped order
+- Validates billing cycle skipped status
+- Updates upcoming orders list
+- Displays formatted date in customer timezone
+
+```tsx
+function SkipNextOrderModal({resumeDate, cycleIndexToSkip}) {
+  const formatDate = useFormatDate();
+  
+  async function handleSkipNextOrder() {
+    const result = await skipBillingCycle(SkipBillingCycleMutation, {
+      subscriptionContractId: contractId,
+      billingCycleIndex: cycleIndexToSkip,
+    });
+
+    if (!result?.subscriptionBillingCycleSkip?.billingCycle?.skipped) {
+      // Handle error
+      return;
+    }
+
+    onSkipOrder();
+  }
+  
+  return (
+    <TextBlock>
+      {resumeDate
+        ? i18n.translate('skipNextOrder.date', {
+            date: formatDate(resumeDate),
+          })
+        : i18n.translate('skipNextOrder.generic')}
+    </TextBlock>
+  );
+}
+```
+
+### Manage Upcoming Orders
+
+```tsx
+import {UpcomingOrdersModal} from '~/components/UpcomingOrdersModal';
+
+<UpcomingOrdersModal
+  contractId={contractId}
+  upcomingOrders={upcomingBillingCycles}
+  onUpdateOrders={refetchSubscriptionContract}
+/>
+```
+
+**Features:**
+- Toggle skip status for multiple upcoming orders
+- Bulk skip/unskip operations
+- Real-time order list updates
+- Visual indicators for skipped orders
+
+## Toast Notifications
+
+Success feedback using the toast system:
+
+```tsx
+import {useToast, SuccessToastType} from 'utilities/hooks/useToast';
+
+const {showSuccessToast} = useToast();
+
+// Show success messages
+showSuccessToast(SuccessToastType.Paused);
+showSuccessToast(SuccessToastType.Resumed);
+showSuccessToast(SuccessToastType.Cancelled);
+showSuccessToast(SuccessToastType.Skipped);
+```
+
+## API Integration
+
+The customer portal uses multiple APIs:
+
+<Tabs>
+  <Tab title="GraphQL API">
+    Direct Shopify Customer Account API access:
+
+    ```tsx
+    import {useGraphqlApi} from 'foundation/Api';
+
+    const [mutationFn] = useGraphqlApi<MutationData, MutationVariables>();
+
+    const result = await mutationFn(MutationDocument, variables);
+    ```
+  </Tab>
+
+  <Tab title="App Backend">
+    Custom app endpoint requests:
+
+    ```tsx
+    import {useAppRequest} from 'foundation/Api';
+
+    const sendRequest = useAppRequest();
+
+    sendRequest({
+      contractId,
+      operationName: 'PAUSE',
+    });
+    ```
+  </Tab>
+
+  <Tab title="Extension API">
+    UI extension utilities:
+
+    ```tsx
+    import {useExtensionApi} from 'foundation/Api';
+
+    const {
+      i18n,
+      ui: {overlay},
+    } = useExtensionApi();
+
+    overlay.open('modal-id');
+    overlay.close('modal-id');
+    ```
+  </Tab>
+</Tabs>
+
+## Localization
+
+The extension supports 30+ languages with translation files in `locales/`:
+
+```json
+// locales/en.default.json
+{
+  "subscriptions": "Subscriptions",
+  "manageSubscription": "Manage subscription",
+  "pauseSubscriptionModal": {
+    "title": "Pause subscription",
+    "description": "Your subscription will be paused...",
+    "action": "Pause subscription"
+  }
+}
+```
+
+### Supported Languages
+
+<AccordionGroup>
+  <Accordion title="European Languages">
+    - English (en)
+    - French (fr)
+    - German (de)
+    - Spanish (es)
+    - Italian (it)
+    - Dutch (nl)
+    - Portuguese (pt-BR, pt-PT)
+    - Polish (pl)
+    - Swedish (sv)
+    - Norwegian (nb)
+    - Danish (da)
+    - Finnish (fi)
+    - Czech (cs)
+  </Accordion>
+
+  <Accordion title="Asian Languages">
+    - Japanese (ja)
+    - Korean (ko)
+    - Chinese Simplified (zh-CN)
+    - Chinese Traditional (zh-TW)
+    - Thai (th)
+    - Vietnamese (vi)
+    - Indonesian (id)
+    - Malay (ms)
+    - Hindi (hi)
+  </Accordion>
+
+  <Accordion title="Other Languages">
+    - Russian (ru)
+    - Turkish (tr)
+    - Greek (el)
+    - Hungarian (hu)
+    - Romanian (ro-RO)
+    - Croatian (hr-HR)
+    - Slovak (sk-SK)
+    - Slovenian (sl-SI)
+    - Lithuanian (lt-LT)
+    - Bulgarian (bg-BG)
+  </Accordion>
+</AccordionGroup>
+
+## Error Handling
+
+All customer actions include comprehensive error handling:
+
+```tsx
+const [error, setError] = useState(false);
+const [errorMessage, setErrorMessage] = useState<string | undefined>();
+
+// In mutation handler
+if (result?.subscriptionContractPause?.userErrors?.length) {
+  setError(true);
+  setErrorMessage(
+    result?.subscriptionContractPause?.userErrors[0].message,
+  );
+  return;
+}
+
+// In UI
+{error ? (
+  <Banner
+    status="critical"
+    title={i18n.translate('pauseSubscriptionModal.errorBannerTitle')}
+  >
+    {errorMessage}
+  </Banner>
+) : null}
+```
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Contract Management" icon="file-contract" href="/features/contract-management">
+    Backend services for subscription operations
+  </Card>
+  <Card title="Admin Extensions" icon="puzzle-piece" href="/features/admin-extensions">
+    Merchant-facing subscription management
+  </Card>
+</CardGroup>

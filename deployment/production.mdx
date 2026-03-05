@@ -1,0 +1,677 @@
+---
+title: Production Deployment
+description: Deploy the Shopify Subscriptions Reference App to production with best practices and platform-specific guides
+---
+
+## Overview
+
+This guide covers production deployment of the Shopify Subscriptions Reference App, including build optimization, hosting platform setup, and production best practices.
+
+## Pre-Deployment Checklist
+
+Before deploying to production, ensure you've completed:
+
+<Steps>
+  <Step title="Review system requirements">
+    Verify all [system requirements](/deployment/requirements) are met.
+  </Step>
+  
+  <Step title="Configure production database">
+    Set up a production-grade database (PostgreSQL or MySQL) following the [database setup guide](/deployment/database-setup).
+  </Step>
+  
+  <Step title="Set environment variables">
+    Configure all required [environment variables](/deployment/environment-variables) for production.
+  </Step>
+  
+  <Step title="Update shopify.app.toml">
+    Update `application_url` and `redirect_urls` with your production domain:
+    ```toml
+    application_url = "https://your-app-domain.com"
+    
+    [auth]
+    redirect_urls = [
+      "https://your-app-domain.com/auth/callback",
+      "https://your-app-domain.com/auth/shopify/callback",
+      "https://your-app-domain.com/api/auth/callback",
+    ]
+    ```
+  </Step>
+  
+  <Step title="Test locally">
+    Run the production build locally to catch any issues:
+    ```bash
+    pnpm build
+    pnpm start
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Ensure your production domain uses HTTPS. Shopify requires all app URLs to be served over HTTPS.
+</Warning>
+
+## Build Process
+
+The app uses Remix with Vite for building:
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    pnpm install --frozen-lockfile
+    ```
+  </Step>
+  
+  <Step title="Generate Prisma client">
+    ```bash
+    pnpm prisma generate
+    ```
+  </Step>
+  
+  <Step title="Run type checking">
+    ```bash
+    pnpm type-check
+    ```
+  </Step>
+  
+  <Step title="Build the application">
+    ```bash
+    pnpm build
+    ```
+    
+    This creates optimized production assets in `build/`:
+    - `build/server/` - Server-side code
+    - `build/client/` - Client-side assets
+  </Step>
+  
+  <Step title="Deploy database migrations">
+    ```bash
+    pnpm db:migrate
+    ```
+  </Step>
+</Steps>
+
+### Build Scripts
+
+The `package.json` includes these production scripts:
+
+```json
+{
+  "scripts": {
+    "build": "NODE_ENV=production remix vite:build",
+    "start": "remix-serve ./build/server/index.js",
+    "setup": "prisma generate && prisma migrate deploy",
+    "db:migrate": "prisma migrate deploy"
+  }
+}
+```
+
+## Deployment Platforms
+
+### Railway
+
+Railway provides automatic deployment from GitHub with built-in database support.
+
+<Steps>
+  <Step title="Create new project">
+    1. Go to [railway.app](https://railway.app)
+    2. Click "New Project"
+    3. Select "Deploy from GitHub repo"
+    4. Connect your repository
+  </Step>
+  
+  <Step title="Add PostgreSQL database">
+    1. Click "New" → "Database" → "PostgreSQL"
+    2. Railway automatically sets `DATABASE_URL` environment variable
+  </Step>
+  
+  <Step title="Configure build settings">
+    Railway auto-detects Node.js projects. Override if needed:
+    
+    **Build Command:**
+    ```bash
+    pnpm install && pnpm build && pnpm setup
+    ```
+    
+    **Start Command:**
+    ```bash
+    pnpm start
+    ```
+  </Step>
+  
+  <Step title="Set environment variables">
+    Add in Railway dashboard under Variables:
+    - `SHOPIFY_API_KEY`
+    - `SHOPIFY_API_SECRET`
+    - `SHOPIFY_APP_URL` (use Railway's generated domain)
+    - `SCOPES`
+    - `NODE_ENV=production`
+  </Step>
+  
+  <Step title="Deploy">
+    Push to your GitHub repository. Railway automatically builds and deploys.
+  </Step>
+</Steps>
+
+### Fly.io
+
+Fly.io offers global edge deployment with automatic SSL.
+
+<Steps>
+  <Step title="Install Fly CLI">
+    ```bash
+    curl -L https://fly.io/install.sh | sh
+    ```
+  </Step>
+  
+  <Step title="Login to Fly">
+    ```bash
+    flyctl auth login
+    ```
+  </Step>
+  
+  <Step title="Create fly.toml">
+    ```toml
+    app = "your-app-name"
+    primary_region = "iad"
+    
+    [build]
+      [build.args]
+        NODE_VERSION = "20"
+    
+    [env]
+      PORT = "3000"
+      NODE_ENV = "production"
+    
+    [[services]]
+      internal_port = 3000
+      protocol = "tcp"
+    
+      [[services.ports]]
+        handlers = ["http"]
+        port = 80
+        force_https = true
+    
+      [[services.ports]]
+        handlers = ["tls", "http"]
+        port = 443
+    
+      [services.concurrency]
+        type = "connections"
+        hard_limit = 25
+        soft_limit = 20
+    
+      [[services.tcp_checks]]
+        interval = "15s"
+        timeout = "2s"
+        grace_period = "5s"
+    ```
+  </Step>
+  
+  <Step title="Create PostgreSQL database">
+    ```bash
+    flyctl postgres create
+    flyctl postgres attach --app your-app-name your-postgres-name
+    ```
+  </Step>
+  
+  <Step title="Set secrets">
+    ```bash
+    flyctl secrets set SHOPIFY_API_KEY=your_api_key
+    flyctl secrets set SHOPIFY_API_SECRET=your_api_secret
+    flyctl secrets set SHOPIFY_APP_URL=https://your-app.fly.dev
+    flyctl secrets set SCOPES="customer_read_customers,..."
+    ```
+  </Step>
+  
+  <Step title="Deploy">
+    ```bash
+    flyctl deploy
+    ```
+  </Step>
+</Steps>
+
+### Google Cloud Run
+
+Serverless container platform with automatic scaling.
+
+<Steps>
+  <Step title="Create Dockerfile">
+    ```dockerfile
+    FROM node:20-alpine
+    
+    WORKDIR /app
+    
+    # Install pnpm
+    RUN npm install -g pnpm
+    
+    # Copy package files
+    COPY package.json pnpm-lock.yaml ./
+    
+    # Install dependencies
+    RUN pnpm install --frozen-lockfile --prod
+    
+    # Copy application code
+    COPY . .
+    
+    # Generate Prisma client
+    RUN pnpm prisma generate
+    
+    # Build application
+    RUN pnpm build
+    
+    # Expose port
+    EXPOSE 3000
+    
+    # Start application
+    CMD ["pnpm", "start"]
+    ```
+  </Step>
+  
+  <Step title="Build container image">
+    ```bash
+    gcloud builds submit --tag gcr.io/PROJECT_ID/subscriptions-app
+    ```
+  </Step>
+  
+  <Step title="Deploy to Cloud Run">
+    ```bash
+    gcloud run deploy subscriptions-app \
+      --image gcr.io/PROJECT_ID/subscriptions-app \
+      --platform managed \
+      --region us-central1 \
+      --allow-unauthenticated \
+      --set-env-vars SHOPIFY_API_KEY=your_api_key \
+      --set-env-vars SHOPIFY_API_SECRET=your_api_secret \
+      --set-env-vars SHOPIFY_APP_URL=https://your-app-run.app \
+      --set-env-vars DATABASE_URL=postgresql://... \
+      --set-env-vars SCOPES="customer_read_customers,..." \
+      --set-env-vars NODE_ENV=production
+    ```
+  </Step>
+  
+  <Step title="Set up Cloud SQL">
+    1. Create Cloud SQL PostgreSQL instance
+    2. Connect to Cloud Run:
+    ```bash
+    gcloud run services update subscriptions-app \
+      --add-cloudsql-instances PROJECT_ID:REGION:INSTANCE_NAME
+    ```
+  </Step>
+</Steps>
+
+### Vercel
+
+Optimized for Remix applications with automatic deployments.
+
+<Steps>
+  <Step title="Install Vercel CLI">
+    ```bash
+    npm install -g vercel
+    ```
+  </Step>
+  
+  <Step title="Configure vercel.json">
+    ```json
+    {
+      "buildCommand": "pnpm build",
+      "devCommand": "pnpm dev",
+      "installCommand": "pnpm install",
+      "framework": "remix",
+      "outputDirectory": "build"
+    }
+    ```
+  </Step>
+  
+  <Step title="Deploy">
+    ```bash
+    vercel --prod
+    ```
+  </Step>
+  
+  <Step title="Set environment variables">
+    Configure in Vercel dashboard under Project Settings → Environment Variables.
+  </Step>
+</Steps>
+
+<Warning>
+  Vercel has limitations with Prisma and database connections. Use Vercel Postgres or an external database with connection pooling.
+</Warning>
+
+## Database Migration Strategy
+
+For zero-downtime deployments:
+
+<Steps>
+  <Step title="Backup database">
+    Always create a backup before running migrations:
+    ```bash
+    pg_dump -h host -U user -d database > backup-$(date +%Y%m%d).sql
+    ```
+  </Step>
+  
+  <Step title="Run migrations">
+    Deploy migrations before deploying new code:
+    ```bash
+    pnpm db:migrate
+    ```
+  </Step>
+  
+  <Step title="Deploy application">
+    Deploy new application version after successful migration.
+  </Step>
+  
+  <Step title="Verify deployment">
+    Test critical paths and monitor logs for errors.
+  </Step>
+</Steps>
+
+## Health Checks
+
+The app includes a health check endpoint at `/services/ping`:
+
+```typescript
+// app/routes/services.ping.tsx
+export async function loader() {
+  if (process.env.MAINTENANCE_MODE === 'true') {
+    throw new Response('Service Unavailable', { status: 503 });
+  }
+  
+  return json({ status: 'ok' });
+}
+```
+
+Configure your platform's health check:
+
+```bash
+# Railway
+HEALTHCHECK_PATH=/services/ping
+
+# Fly.io (in fly.toml)
+[[services.http_checks]]
+  interval = 10000
+  grace_period = "5s"
+  method = "get"
+  path = "/services/ping"
+  protocol = "http"
+  timeout = 2000
+```
+
+## Performance Optimization
+
+### Enable Prisma Tracing
+
+The schema includes tracing preview feature:
+
+```prisma
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["tracing"]
+}
+```
+
+### Connection Pooling
+
+Use connection pooling for production databases:
+
+```bash
+# PgBouncer
+DATABASE_URL="postgresql://user:password@host:6543/database?pgbouncer=true"
+
+# Prisma Data Proxy
+DATABASE_URL="prisma://aws-us-east-1.prisma-data.com/?api_key=key"
+```
+
+### Caching
+
+Configure HTTP caching headers for static assets in `vite.config.ts`.
+
+## Monitoring and Logging
+
+### Application Logs
+
+The app uses Pino for structured logging:
+
+```typescript
+import { logger } from '~/utils/logger.server';
+
+logger.info({ shop, action: 'subscription_created' }, 'Subscription created');
+logger.error({ error, shop }, 'Failed to process billing');
+```
+
+### Monitoring Services
+
+<CardGroup cols={2}>
+  <Card title="Sentry" icon="bug">
+    Error tracking and performance monitoring
+    ```bash
+    pnpm add @sentry/remix
+    ```
+  </Card>
+  
+  <Card title="Datadog" icon="chart-line">
+    Full-stack observability platform
+    ```bash
+    pnpm add dd-trace
+    ```
+  </Card>
+  
+  <Card title="LogRocket" icon="video">
+    Session replay and error tracking
+    ```bash
+    pnpm add logrocket
+    ```
+  </Card>
+  
+  <Card title="New Relic" icon="gauge">
+    Application performance monitoring
+    ```bash
+    pnpm add newrelic
+    ```
+  </Card>
+</CardGroup>
+
+## Security Best Practices
+
+<Steps>
+  <Step title="Use HTTPS only">
+    Ensure all URLs use HTTPS in production. Shopify requires SSL/TLS.
+  </Step>
+  
+  <Step title="Rotate secrets regularly">
+    Change `SHOPIFY_API_SECRET` and database credentials periodically.
+  </Step>
+  
+  <Step title="Enable rate limiting">
+    Implement rate limiting on webhooks and API endpoints.
+  </Step>
+  
+  <Step title="Validate webhook signatures">
+    The app automatically validates Shopify webhook HMAC signatures.
+  </Step>
+  
+  <Step title="Set security headers">
+    Configure security headers in your hosting platform:
+    ```
+    X-Frame-Options: DENY
+    X-Content-Type-Options: nosniff
+    Strict-Transport-Security: max-age=31536000; includeSubDomains
+    ```
+  </Step>
+</Steps>
+
+## Scaling Considerations
+
+### Horizontal Scaling
+
+The app is stateless and can scale horizontally:
+
+- **Railway**: Adjust replicas in dashboard
+- **Fly.io**: `flyctl scale count 3`
+- **Google Cloud Run**: Set min/max instances
+
+### Database Scaling
+
+<Steps>
+  <Step title="Connection pooling">
+    Use PgBouncer or similar for connection management.
+  </Step>
+  
+  <Step title="Read replicas">
+    Add read replicas for query-heavy operations.
+  </Step>
+  
+  <Step title="Indexing">
+    Ensure proper indexes on frequently queried columns:
+    ```prisma
+    @@index([completedAt])
+    @@unique([shop, contractId, billingCycleIndex, failureReason])
+    ```
+  </Step>
+</Steps>
+
+### Background Jobs
+
+For high-volume shops, consider offloading background jobs:
+
+- **Google Cloud Tasks** (included dependency)
+- **BullMQ** with Redis
+- **Inngest**
+- **Temporal**
+
+## Rollback Strategy
+
+Plan for rollbacks in case of issues:
+
+<Steps>
+  <Step title="Keep previous version">
+    Most platforms keep previous deployments for instant rollback.
+  </Step>
+  
+  <Step title="Database rollback">
+    For schema changes, prepare down migrations:
+    ```bash
+    prisma migrate dev --create-only
+    # Edit migration to add down logic
+    ```
+  </Step>
+  
+  <Step title="Monitor after deploy">
+    Watch error rates and performance metrics closely after deployment.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Build Failures
+
+<Steps>
+  <Step title="Clear cache">
+    ```bash
+    rm -rf node_modules .cache build
+    pnpm install
+    pnpm build
+    ```
+  </Step>
+  
+  <Step title="Check Node version">
+    Ensure Node.js 18+ is installed:
+    ```bash
+    node --version
+    ```
+  </Step>
+  
+  <Step title="Verify Prisma client">
+    ```bash
+    pnpm prisma generate
+    ```
+  </Step>
+</Steps>
+
+### Runtime Errors
+
+<Steps>
+  <Step title="Check environment variables">
+    Verify all required variables are set correctly.
+  </Step>
+  
+  <Step title="Review logs">
+    Check application logs for error details.
+  </Step>
+  
+  <Step title="Test database connection">
+    ```bash
+    pnpm prisma db pull
+    ```
+  </Step>
+</Steps>
+
+### Webhook Delivery Issues
+
+<Steps>
+  <Step title="Verify webhook URL">
+    Ensure webhook endpoints are publicly accessible.
+  </Step>
+  
+  <Step title="Check HMAC validation">
+    Shopify webhook signature validation must pass.
+  </Step>
+  
+  <Step title="Review Shopify webhook logs">
+    Check webhook delivery status in Shopify Partner Dashboard.
+  </Step>
+</Steps>
+
+## Post-Deployment
+
+<Steps>
+  <Step title="Update app URLs in Partner Dashboard">
+    Update your app's URLs to match production domain.
+  </Step>
+  
+  <Step title="Test OAuth flow">
+    Install the app on a test store to verify authentication.
+  </Step>
+  
+  <Step title="Test webhook delivery">
+    Trigger webhook events and verify processing.
+  </Step>
+  
+  <Step title="Monitor performance">
+    Set up alerts for errors, slow queries, and high resource usage.
+  </Step>
+  
+  <Step title="Document deployment">
+    Keep deployment notes for future reference and team knowledge.
+  </Step>
+</Steps>
+
+## Maintenance Mode
+
+Enable maintenance mode when needed:
+
+```bash
+MAINTENANCE_MODE=true
+```
+
+The `/services/ping` endpoint returns 503, and you can add custom maintenance page logic.
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="System Requirements" icon="list-check" href="/deployment/requirements">
+    Review prerequisites and dependencies
+  </Card>
+  
+  <Card title="Database Setup" icon="database" href="/deployment/database-setup">
+    Configure database and migrations
+  </Card>
+  
+  <Card title="Environment Variables" icon="gear" href="/deployment/environment-variables">
+    Configure required environment variables
+  </Card>
+  
+  <Card title="Shopify App Dev Docs" icon="book" href="https://shopify.dev/docs/apps">
+    Official Shopify app development documentation
+  </Card>
+</CardGroup>

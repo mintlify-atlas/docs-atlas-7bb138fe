@@ -1,97 +1,114 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Shopify Subscriptions Reference App"
+description: "Build powerful subscription experiences on Shopify with a production-ready reference implementation"
 ---
 
-## Setting up
+## Welcome to Shopify Subscriptions Reference App
 
-Get your documentation site up and running in minutes.
+The Shopify Subscriptions Reference App is a comprehensive, production-ready implementation for building subscription management applications on the Shopify platform. Built with Remix, it includes all the core features you need to offer subscription products to your customers.
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get your subscription app running in minutes
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Installation" icon="download" href="/installation">
+    Set up your development environment
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Core Concepts" icon="book" href="/concepts/overview">
+    Understand how subscriptions work on Shopify
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/models/selling-plan">
+    Explore the complete API documentation
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Key Features
 
-Everything you need to create world-class documentation.
+<CardGroup cols={2}>
+  <Card title="Selling Plans" icon="calendar" href="/concepts/selling-plans">
+    Create flexible subscription plans with custom delivery frequencies and discounts
+  </Card>
+  <Card title="Contract Management" icon="file-contract" href="/features/contract-management">
+    Manage the full subscription lifecycle - create, pause, resume, and cancel
+  </Card>
+  <Card title="Automated Billing" icon="credit-card" href="/concepts/billing-cycles">
+    Process recurring payments with intelligent dunning management
+  </Card>
+  <Card title="Customer Portal" icon="users" href="/features/customer-portal">
+    Give customers control with a self-service subscription management portal
+  </Card>
+  <Card title="Admin Extensions" icon="puzzle-piece" href="/features/admin-extensions">
+    Extend the Shopify admin with custom subscription management tools
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/features/webhooks">
+    React to subscription events in real-time
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## What's Included
 
-## Need inspiration?
+This reference app provides everything you need to build a subscription application:
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+- **Complete Subscription Management** - Create and manage selling plan groups with flexible pricing and delivery options
+- **Customer Experience** - Customer-facing UI extensions for managing subscriptions from their account
+- **Admin Tools** - Shopify admin extensions for merchant subscription management
+- **Billing Infrastructure** - Automated billing cycle processing with retry logic and dunning workflows
+- **Job Scheduling** - Background job system for processing billing, sending emails, and managing inventory
+- **Multi-locale Support** - Built-in translation management for international merchants
+- **Production Ready** - Includes database schema, authentication, and deployment configuration
+
+## Built With Modern Tools
+
+The reference app leverages the latest Shopify development stack:
+
+- **[Remix](https://remix.run/)** - Full-stack web framework for fast, resilient apps
+- **[Shopify App Bridge](https://shopify.dev/docs/api/app-bridge)** - Seamless integration with the Shopify admin
+- **[Polaris](https://polaris.shopify.com/)** - Shopify's design system for consistent UI
+- **[Prisma](https://www.prisma.io/)** - Type-safe database access
+- **[GraphQL](https://graphql.org/)** - Powerful API queries with Shopify's Admin API
+
+## Getting Started
+
+<Steps>
+  <Step title="Clone the repository">
+    Use the Shopify CLI to initialize a new app from this template:
+    ```bash
+    shopify app init --template https://github.com/Shopify/subscriptions-reference-app
+    ```
+  </Step>
+  
+  <Step title="Install dependencies">
+    Install all required packages:
+    ```bash
+    pnpm install
+    ```
+  </Step>
+  
+  <Step title="Start development">
+    Run the app in development mode:
+    ```bash
+    pnpm dev
+    ```
+  </Step>
+</Steps>
+
+<Note>
+This is a reference implementation. If you're building for the Shopify App Store, ensure your app provides [substantive differences](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/subscriptions-app#uniqueness-from-other-apps) from this reference app.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Create Your First Selling Plan" icon="sparkles" href="/guides/creating-selling-plans">
+    Learn how to create subscription plans for your products
+  </Card>
+  <Card title="Set Up Webhooks" icon="bell" href="/guides/setting-up-webhooks">
+    Configure webhooks to respond to subscription events
+  </Card>
+  <Card title="Customize Extensions" icon="paintbrush" href="/guides/customizing-customer-portal">
+    Tailor the customer portal to match your brand
+  </Card>
+  <Card title="Deploy to Production" icon="rocket" href="/deployment/production">
+    Launch your subscription app
+  </Card>
+</CardGroup>

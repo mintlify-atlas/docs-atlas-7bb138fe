@@ -1,0 +1,196 @@
+---
+title: System Requirements
+description: Prerequisites and system requirements for deploying the Shopify Subscriptions Reference App
+---
+
+## Overview
+
+Before deploying the Shopify Subscriptions Reference App, ensure your environment meets the following requirements.
+
+## Node.js Runtime
+
+<Card title="Node.js Version" icon="node-js">
+  The app requires Node.js 18.x or higher. The recommended version is Node.js 20.x LTS or later.
+</Card>
+
+```bash
+node --version
+# Should output v18.0.0 or higher
+```
+
+## Package Manager
+
+This app uses **pnpm** as the primary package manager. While npm and yarn are supported, pnpm is recommended for consistency with the development environment.
+
+<Steps>
+  <Step title="Install pnpm">
+    ```bash
+    npm install -g pnpm
+    ```
+  </Step>
+  
+  <Step title="Verify installation">
+    ```bash
+    pnpm --version
+    ```
+  </Step>
+</Steps>
+
+## Required Dependencies
+
+### Core Framework
+
+- **Remix** 2.16.8 - Full-stack web framework
+- **React** 18.3.1 - UI library
+- **TypeScript** 5.8.3 - Type-safe development
+
+### Shopify Integration
+
+- **@shopify/shopify-app-remix** 3.8.3 - Shopify app framework for Remix
+- **@shopify/shopify-api** 11.13.0 - Shopify API client
+- **@shopify/cli** 3.81.2 - Shopify CLI tools
+- **@shopify/polaris** 13.9.5 - Shopify's design system
+- **@shopify/app-bridge-react** 4.1.10 - Embedded app integration
+
+### Database
+
+- **Prisma** 6.10.1 - Database ORM
+- **@prisma/client** 6.10.1 - Prisma client library
+- SQLite (development) or PostgreSQL/MySQL (production)
+
+<Warning>
+  The default Prisma configuration uses SQLite (`file:./data.db`). For production deployments, you must configure a production-grade database like PostgreSQL or MySQL.
+</Warning>
+
+## Cloud Services (Optional)
+
+The app includes optional integrations with Google Cloud Platform:
+
+- **@google-cloud/storage** 7.16.0 - For cloud storage
+- **@google-cloud/tasks** 6.1.0 - For background job processing
+
+<Card title="Note" icon="info">
+  GCP services are optional and can be replaced with alternative providers based on your infrastructure requirements.
+</Card>
+
+## Shopify Partner Account
+
+<Steps>
+  <Step title="Create a Shopify Partner account">
+    Sign up at [partners.shopify.com](https://partners.shopify.com) if you don't already have an account.
+  </Step>
+  
+  <Step title="Create a new app">
+    In your Partner Dashboard, create a new app to obtain your API credentials.
+  </Step>
+  
+  <Step title="Note your credentials">
+    You'll need:
+    - Client ID (API Key)
+    - Client Secret (API Secret)
+    - App URL (your deployment URL)
+  </Step>
+</Steps>
+
+## Development Store
+
+For testing, you'll need a Shopify development store with:
+
+- Shopify Payments enabled (for testing subscriptions)
+- Test credit cards for payment testing
+- Products configured with selling plans
+
+## Required Scopes
+
+The app requires the following Shopify API scopes:
+
+```toml
+scopes = "customer_read_customers,customer_read_orders,customer_read_own_subscription_contracts,customer_write_customers,customer_write_own_subscription_contracts,read_all_orders,read_locales,read_locations,read_themes,write_customer_payment_methods,write_customers,write_metaobject_definitions,write_metaobjects,write_orders,write_own_subscription_contracts,write_products,write_translations,read_analytics"
+```
+
+<Warning>
+  These scopes are configured in `shopify.app.toml` and are automatically requested during the OAuth flow. Ensure your app is approved for these scopes in production.
+</Warning>
+
+## Webhook Configuration
+
+The app requires webhook subscriptions for the following topics:
+
+- `app/uninstalled`
+- `subscription_contracts/create`
+- `subscription_contracts/activate`
+- `subscription_contracts/cancel`
+- `subscription_contracts/pause`
+- `subscription_billing_cycles/skip`
+- `subscription_billing_attempts/success`
+- `subscription_billing_attempts/failure`
+- `selling_plan_groups/create`
+- `selling_plan_groups/update`
+- Compliance webhooks: `customers/data_request`, `customers/redact`, `shop/redact`
+
+## Build Requirements
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    pnpm install
+    ```
+  </Step>
+  
+  <Step title="Run type checking">
+    ```bash
+    pnpm type-check
+    ```
+  </Step>
+  
+  <Step title="Build the application">
+    ```bash
+    pnpm build
+    ```
+  </Step>
+</Steps>
+
+## Server Requirements
+
+### Minimum Specifications
+
+- **CPU**: 1 vCPU (2+ recommended for production)
+- **RAM**: 512 MB minimum (1-2 GB recommended)
+- **Storage**: 1 GB minimum
+- **Network**: HTTPS support required (TLS 1.2+)
+
+### Hosting Platform
+
+The app can be deployed to any Node.js hosting platform:
+
+<CardGroup cols={2}>
+  <Card title="Shopify Oxygen" icon="shopify">
+    Optimized for Shopify apps with built-in scaling
+  </Card>
+  
+  <Card title="Railway" icon="train">
+    Simple deployment with automatic SSL
+  </Card>
+  
+  <Card title="Fly.io" icon="plane">
+    Global edge deployment
+  </Card>
+  
+  <Card title="Google Cloud Run" icon="google">
+    Serverless container platform
+  </Card>
+</CardGroup>
+
+<Warning>
+  Your hosting platform must support:
+  - Node.js 18+
+  - Persistent storage or external database
+  - HTTPS endpoints (required by Shopify)
+  - Webhook delivery (publicly accessible URLs)
+</Warning>
+
+## Next Steps
+
+<Card title="Continue to Database Setup" icon="database" href="/deployment/database-setup">
+  Learn how to configure your database and run migrations
+</Card>

@@ -1,0 +1,436 @@
+---
+title: Billing Schedule Management
+description: Configure and process subscription billing schedules with automated batch processing
+---
+
+The billing schedule system manages when and how subscription billing cycles are processed, supporting timezone-aware scheduling and batch operations.
+
+## Overview
+
+<CardGroup cols={2}>
+  <Card title="Active Schedules" icon="clock" href="#active-schedules">
+    Manage active billing schedules per shop
+  </Card>
+  <Card title="Batch Processing" icon="layer-group" href="#batch-processing">
+    Process billing schedules in paginated batches
+  </Card>
+  <Card title="Timezone Support" icon="globe" href="#timezone-configuration">
+    IANA timezone-aware billing execution
+  </Card>
+  <Card title="Database Models" icon="database" href="#data-model">
+    Prisma-based billing schedule storage
+  </Card>
+</CardGroup>
+
+## BillingSchedule Model
+
+The `BillingSchedule` model tracks billing configuration for each shop.
+
+### Core Functions
+
+The billing schedule service provides three main operations located in `~/app/models/BillingSchedule/BillingSchedule.server.ts`:
+
+<CodeGroup>
+```typescript Find Active Schedules
+import {findActiveBillingSchedulesInBatches} from '~/models/BillingSchedule/BillingSchedule.server';
+
+// Process all active billing schedules in batches
+await findActiveBillingSchedulesInBatches(async (schedules) => {
+  for (const schedule of schedules) {
+    console.log(`Processing shop: ${schedule.shop}`);
+    console.log(`Timezone: ${schedule.timezone}`);
+    // Process billing for this schedule
+  }
+});
+```
+
+```typescript Create Active Schedule
+import {createActiveBillingSchedule} from '~/models/BillingSchedule/BillingSchedule.server';
+
+// Create or update billing schedule for a shop
+const schedule = await createActiveBillingSchedule('example.myshopify.com');
+
+console.log(schedule);
+// {
+//   shop: 'example.myshopify.com',
+//   active: true,
+//   timezone: 'America/New_York'
+// }
+```
+
+```typescript Query Shop Timezone
+// Internal function - queries shop's IANA timezone
+const {admin} = await unauthenticated.admin(shop);
+const {shop: {ianaTimezone}} = await getShopInfos(admin.graphql);
+
+console.log(ianaTimezone); // 'America/Los_Angeles'
+```
+</CodeGroup>
+
+## Active Schedules
+
+### Creating Billing Schedules
+
+When a shop installs the app or updates settings, create an active billing schedule:
+
+```typescript
+import {createActiveBillingSchedule} from '~/models/BillingSchedule/BillingSchedule.server';
+
+const billingSchedule = await createActiveBillingSchedule(shop);
+```
+
+**What this does:**
+
+<Steps>
+  <Step title="Query Shop Timezone">
+    Fetches the shop's IANA timezone via Shopify Admin GraphQL API
+  </Step>
+  
+  <Step title="Upsert Schedule">
+    Creates new schedule or updates existing one with `active: true`
+  </Step>
+  
+  <Step title="Return Schedule">
+    Returns the created/updated `BillingSchedule` record
+  </Step>
+</Steps>
+
+### Implementation Details
+
+```typescript
+export async function createActiveBillingSchedule(
+  shop: string,
+): Promise<BillingSchedule> {
+  const timezone = await queryTimezone(shop);
+  return await upsert({shop, active: true, timezone});
+}
+
+async function queryTimezone(shop: string): Promise<string> {
+  const {admin} = await unauthenticated.admin(shop);
+  const {
+    shop: {ianaTimezone},
+  } = await getShopInfos(admin.graphql);
+  return ianaTimezone;
+}
+```
+
+<Note>
+The `upsert` operation uses Prisma's `upsert` to create or update based on the shop identifier, ensuring idempotency.
+</Note>
+
+## Batch Processing
+
+The billing schedule system processes shops in batches using cursor-based pagination.
+
+### Pagination Implementation
+
+The paginate function (`~/app/models/BillingSchedule/paginate.ts`) handles large-scale processing:
+
+```typescript
+import type {BillingSchedule, Prisma} from '@prisma/client';
+
+export type PaginatorCallbackFn = (records: BillingSchedule[]) => Promise<void>;
+
+const defaults: Prisma.BillingScheduleFindManyArgs = {
+  orderBy: {id: 'asc'},
+  take: 1000, // Process 1000 records per batch
+};
+
+export async function paginate(
+  args: Prisma.BillingScheduleFindManyArgs,
+  callback: PaginatorCallbackFn,
+  cursor?: number,
+): Promise<void> {
+  const cursorArgs: Prisma.BillingScheduleFindManyArgs =
+    cursor === undefined ? {} : {cursor: {id: cursor}, skip: 1};
+
+  const batch = await prisma.billingSchedule.findMany({
+    ...defaults,
+    ...args,
+    ...cursorArgs,
+  });
+
+  if (batch.length === 0) {
+    return;
+  }
+
+  await callback(batch);
+
+  const nextCursor = batch[batch.length - 1].id;
+  return await paginate(args, callback, nextCursor);
+}
+```
+
+### Batch Processing Configuration
+
+<ParamField path="orderBy" type="object" default="{id: 'asc'}">
+  Ensures consistent ordering for cursor pagination
+</ParamField>
+
+<ParamField path="take" type="number" default="1000">
+  Number of records per batch (configurable)
+</ParamField>
+
+<ParamField path="cursor" type="number">
+  Current position in pagination sequence
+</ParamField>
+
+<ParamField path="skip" type="number" default="1">
+  Skip the cursor record itself when paginating
+</ParamField>
+
+### Processing Active Schedules
+
+```typescript
+import {findActiveBillingSchedulesInBatches} from '~/models/BillingSchedule/BillingSchedule.server';
+
+// Process all active billing schedules
+await findActiveBillingSchedulesInBatches(async (schedules) => {
+  console.log(`Processing batch of ${schedules.length} schedules`);
+  
+  for (const schedule of schedules) {
+    try {
+      // Execute billing logic for this shop
+      await processBillingForShop(schedule.shop, schedule.timezone);
+    } catch (error) {
+      console.error(`Failed to process ${schedule.shop}:`, error);
+    }
+  }
+});
+```
+
+<Tabs>
+  <Tab title="Sequential Processing">
+    Process schedules one at a time within each batch:
+
+    ```typescript
+    await findActiveBillingSchedulesInBatches(async (schedules) => {
+      for (const schedule of schedules) {
+        await processSchedule(schedule);
+      }
+    });
+    ```
+  </Tab>
+
+  <Tab title="Parallel Processing">
+    Process multiple schedules concurrently:
+
+    ```typescript
+    await findActiveBillingSchedulesInBatches(async (schedules) => {
+      await Promise.all(
+        schedules.map(schedule => processSchedule(schedule))
+      );
+    });
+    ```
+  </Tab>
+
+  <Tab title="Rate Limited">
+    Process with rate limiting:
+
+    ```typescript
+    import pLimit from 'p-limit';
+    const limit = pLimit(5);
+
+    await findActiveBillingSchedulesInBatches(async (schedules) => {
+      await Promise.all(
+        schedules.map(schedule => 
+          limit(() => processSchedule(schedule))
+        )
+      );
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Timezone Configuration
+
+All billing schedules are timezone-aware, using IANA timezone identifiers.
+
+### Timezone Query
+
+The system queries each shop's timezone from Shopify:
+
+```graphql
+query ShopInfo {
+  shop {
+    ianaTimezone
+    currencyCode
+  }
+}
+```
+
+### Supported Timezones
+
+The app supports all IANA timezones available in Shopify:
+
+<AccordionGroup>
+  <Accordion title="North America">
+    - America/New_York
+    - America/Chicago
+    - America/Denver
+    - America/Los_Angeles
+    - America/Toronto
+    - America/Vancouver
+  </Accordion>
+
+  <Accordion title="Europe">
+    - Europe/London
+    - Europe/Paris
+    - Europe/Berlin
+    - Europe/Amsterdam
+    - Europe/Dublin
+  </Accordion>
+
+  <Accordion title="Asia Pacific">
+    - Asia/Tokyo
+    - Asia/Singapore
+    - Asia/Hong_Kong
+    - Australia/Sydney
+    - Pacific/Auckland
+  </Accordion>
+</AccordionGroup>
+
+### Using Timezones in Billing
+
+```typescript
+import {DateTime} from 'luxon';
+
+function shouldProcessBilling(schedule: BillingSchedule): boolean {
+  const now = DateTime.now().setZone(schedule.timezone);
+  const hour = now.hour;
+  
+  // Process billing at 9 AM shop local time
+  return hour === 9;
+}
+
+await findActiveBillingSchedulesInBatches(async (schedules) => {
+  for (const schedule of schedules) {
+    if (shouldProcessBilling(schedule)) {
+      await processBilling(schedule);
+    }
+  }
+});
+```
+
+## Data Model
+
+The `BillingSchedule` Prisma model:
+
+```prisma
+model BillingSchedule {
+  id        Int      @id @default(autoincrement())
+  shop      String   @unique
+  active    Boolean  @default(true)
+  timezone  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+```
+
+### Schema Fields
+
+<ResponseField name="id" type="integer" required>
+  Auto-incrementing primary key
+</ResponseField>
+
+<ResponseField name="shop" type="string" required>
+  Unique shop domain (e.g., `example.myshopify.com`)
+</ResponseField>
+
+<ResponseField name="active" type="boolean" default="true">
+  Whether billing is currently active for this shop
+</ResponseField>
+
+<ResponseField name="timezone" type="string" required>
+  IANA timezone identifier (e.g., `America/New_York`)
+</ResponseField>
+
+<ResponseField name="createdAt" type="datetime">
+  Timestamp when schedule was created
+</ResponseField>
+
+<ResponseField name="updatedAt" type="datetime">
+  Timestamp of last update
+</ResponseField>
+
+## Usage Examples
+
+### Background Job Processing
+
+```typescript
+import {Job} from '~/lib/jobs';
+import {findActiveBillingSchedulesInBatches} from '~/models/BillingSchedule/BillingSchedule.server';
+
+export class ProcessBillingJob extends Job {
+  async perform() {
+    await findActiveBillingSchedulesInBatches(async (schedules) => {
+      this.logger.info(`Processing ${schedules.length} billing schedules`);
+      
+      for (const schedule of schedules) {
+        await this.processBillingForShop(schedule);
+      }
+    });
+  }
+
+  private async processBillingForShop(schedule: BillingSchedule) {
+    // Execute billing logic
+    this.logger.info({
+      shop: schedule.shop,
+      timezone: schedule.timezone,
+    }, 'Processing billing');
+  }
+}
+```
+
+### Deactivating Schedules
+
+```typescript
+import prisma from '~/db.server';
+
+// Deactivate billing for a shop
+async function deactivateBillingSchedule(shop: string) {
+  await prisma.billingSchedule.update({
+    where: {shop},
+    data: {active: false},
+  });
+}
+
+// Reactivate billing
+async function reactivateBillingSchedule(shop: string) {
+  await prisma.billingSchedule.update({
+    where: {shop},
+    data: {active: true},
+  });
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Error Handling" icon="shield-halved">
+    Always wrap batch processing in try-catch blocks to prevent one failure from stopping the entire batch
+  </Card>
+  
+  <Card title="Logging" icon="file-lines">
+    Log each batch start/completion and individual schedule processing for debugging
+  </Card>
+  
+  <Card title="Timezone Awareness" icon="clock">
+    Always use the shop's timezone for billing time calculations
+  </Card>
+  
+  <Card title="Idempotency" icon="arrows-rotate">
+    Ensure billing operations are idempotent to handle retries safely
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Contract Management" icon="file-contract" href="/features/contract-management">
+    Managing subscription contracts
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/features/webhooks">
+    Billing attempt event handling
+  </Card>
+</CardGroup>

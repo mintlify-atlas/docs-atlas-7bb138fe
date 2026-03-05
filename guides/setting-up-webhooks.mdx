@@ -1,0 +1,556 @@
+---
+title: Setting Up Webhooks
+description: Learn how to configure and handle webhooks for subscription events in the Shopify Subscriptions Reference App
+---
+
+Webhooks notify your app of important subscription events like billing attempts, contract changes, and customer actions. This guide covers webhook configuration and handling.
+
+## Overview
+
+The reference app handles these webhook topics:
+- **Billing attempts**: Success and failure notifications
+- **Contract lifecycle**: Create, activate, pause, cancel
+- **Billing cycles**: Skip events
+- **Selling plans**: Create and update notifications
+- **Compliance**: Data redaction requests
+- **App lifecycle**: Uninstall events
+
+## Webhook Configuration
+
+Webhooks are configured in `shopify.app.toml`:
+
+```toml filename="shopify.app.toml"
+[webhooks]
+api_version = "unstable"
+
+# App lifecycle
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "/webhooks/app/uninstalled"
+
+# Contract events
+[[webhooks.subscriptions]]
+topics = [ "subscription_contracts/create" ]
+uri = "/webhooks/subscription_contracts/create"
+
+[[webhooks.subscriptions]]
+topics = [ "subscription_contracts/activate" ]
+uri = "/webhooks/subscription_contracts/activate"
+
+[[webhooks.subscriptions]]
+topics = [ "subscription_contracts/cancel" ]
+uri = "/webhooks/subscription_contracts/cancel"
+
+[[webhooks.subscriptions]]
+topics = [ "subscription_contracts/pause" ]
+uri = "/webhooks/subscription_contracts/pause"
+
+# Billing cycle events
+[[webhooks.subscriptions]]
+topics = [ "subscription_billing_cycles/skip" ]
+uri = "/webhooks/subscription_billing_cycles/skip"
+
+# Billing attempt events
+[[webhooks.subscriptions]]
+topics = [ "subscription_billing_attempts/success" ]
+uri = "/webhooks/subscription_billing_attempts/success"
+
+[[webhooks.subscriptions]]
+topics = [ "subscription_billing_attempts/failure" ]
+uri = "/webhooks/subscription_billing_attempts/failure"
+
+# Selling plan events
+[[webhooks.subscriptions]]
+topics = [ "selling_plan_groups/create", "selling_plan_groups/update" ]
+uri = "/webhooks/selling_plan_groups/create_or_update"
+
+# Compliance webhooks
+[[webhooks.subscriptions]]
+uri = "/webhooks/customer_redact"
+compliance_topics = [ "customers/data_request", "customers/redact" ]
+
+[[webhooks.subscriptions]]
+uri = "/webhooks/shop_redact"
+compliance_topics = [ "shop/redact" ]
+```
+
+<Note>
+  Using `api_version = "unstable"` gives access to the latest subscription APIs. Update to a stable version before production.
+</Note>
+
+## Webhook Route Structure
+
+Each webhook has a dedicated route file:
+
+```typescript filename="app/routes/webhooks.[topic].tsx"
+import type {ActionFunctionArgs} from '@remix-run/node';
+import {authenticate} from '~/shopify.server';
+import {logger} from '~/utils/logger.server';
+import {jobs} from '~/jobs';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  // Authenticate webhook request
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  // Log webhook receipt
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // Process webhook (typically enqueue a job)
+  // ... webhook-specific logic
+
+  return new Response();
+};
+```
+
+<Warning>
+  Always return a response within 5 seconds or Shopify will retry the webhook.
+</Warning>
+
+## Billing Attempt Webhooks
+
+### Handling Success
+
+```typescript filename="app/routes/webhooks.subscription_billing_attempts.success.tsx"
+import type {ActionFunctionArgs} from '@remix-run/node';
+import {DunningStopJob, jobs} from '~/jobs';
+import {authenticate} from '~/shopify.server';
+import type {Webhooks} from '~/types';
+import {logger} from '~/utils/logger.server';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // Stop any pending dunning retries
+  jobs.enqueue(
+    new DunningStopJob({
+      shop,
+      payload: payload as Webhooks.SubscriptionBillingAttemptSuccess,
+    }),
+  );
+
+  return new Response();
+};
+```
+
+### Handling Failure
+
+```typescript filename="app/routes/webhooks.subscription_billing_attempts.failure.tsx"
+import type {ActionFunctionArgs} from '@remix-run/node';
+import {DunningStartJob, jobs} from '~/jobs';
+import {authenticate} from '~/shopify.server';
+import type {Webhooks} from '~/types';
+import {logger} from '~/utils/logger.server';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // Start dunning workflow for failed payment
+  jobs.enqueue(
+    new DunningStartJob({
+      shop,
+      payload: payload as Webhooks.SubscriptionBillingAttemptFailure,
+    }),
+  );
+
+  return new Response();
+};
+```
+
+<Tip>
+  Use job queues to handle webhook processing asynchronously. This ensures quick response times.
+</Tip>
+
+## Selling Plan Webhooks
+
+Automatic translation creation when selling plans are created or updated:
+
+```typescript filename="app/routes/webhooks.selling_plan_groups.create_or_update.tsx"
+import type {ActionFunctionArgs} from '@remix-run/node';
+import {CreateSellingPlanTranslationsJob, jobs} from '~/jobs';
+import {authenticate} from '~/shopify.server';
+import type {Webhooks} from '~/types';
+import {logger} from '~/utils/logger.server';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  jobs.enqueue(
+    new CreateSellingPlanTranslationsJob({
+      shop,
+      payload: payload as Webhooks.SellingPlanGroups,
+    }),
+  );
+
+  return new Response();
+};
+```
+
+### Translation Job Implementation
+
+```typescript filename="app/jobs/webhooks/CreateSellingPlanTranslationsJob.ts"
+export class CreateSellingPlanTranslationsJob extends Job<
+  Jobs.Parameters<Webhooks.SellingPlanGroups>
+> {
+  public queue: string = 'webhooks';
+
+  async perform(): Promise<void> {
+    const {shop, payload} = this.parameters;
+    const {admin_graphql_api_id: sellingPlanGroupId, admin_graphql_api_app: appGid} = payload;
+
+    // Only process events from this app
+    if (appGid !== env.appGID) {
+      this.logger.info(
+        'Not creating translation since event is not from subscriptions app',
+      );
+      return;
+    }
+
+    const {admin} = await unauthenticated.admin(shop);
+    const {shopLocalesWithoutPrimary} = await getShopLocales(admin.graphql);
+    const {shop: shopInfo} = await getShopInfos(admin.graphql);
+
+    // Get selling plan details
+    const response = await admin.graphql(SellingPlanTranslations, {
+      variables: {id: sellingPlanGroupId},
+    });
+
+    const {data} = await response.json();
+    if (!data?.sellingPlanGroup) {
+      this.logger.warn({sellingPlanGroupId}, 'No selling plan group found');
+      return;
+    }
+
+    const sellingPlans = nodesFromEdges(
+      data.sellingPlanGroup.sellingPlans.edges || [],
+    );
+
+    // Create translations for all locales
+    await createSellingPlanTranslations(
+      admin.graphql,
+      sellingPlans,
+      shopLocalesWithoutPrimary,
+      shopInfo.currencyCode,
+    );
+  }
+}
+```
+
+## Contract Lifecycle Webhooks
+
+### Contract Creation
+
+```typescript filename="app/routes/webhooks.subscription_contracts.create.tsx"
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // Track contract creation in analytics
+  // Send confirmation email
+  // Update inventory reservations
+
+  return new Response();
+};
+```
+
+### Contract Cancellation
+
+```typescript filename="app/routes/webhooks.subscription_contracts.cancel.tsx"
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // Cancel any pending dunning jobs
+  // Update customer records
+  // Send cancellation confirmation
+
+  return new Response();
+};
+```
+
+## App Uninstall Webhook
+
+Cleanup when the app is uninstalled:
+
+```typescript filename="app/routes/webhooks.app.uninstalled.tsx"
+import type {ActionFunctionArgs} from '@remix-run/node';
+import {DisableShopJob, jobs} from '~/jobs';
+import {authenticate} from '~/shopify.server';
+import {logger} from '~/utils/logger.server';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop} = await authenticate.webhook(request);
+
+  logger.info({topic, shop}, 'App uninstalled');
+
+  jobs.enqueue(
+    new DisableShopJob({
+      shop,
+      payload: {},
+    }),
+  );
+
+  return new Response();
+};
+```
+
+## Compliance Webhooks
+
+### Customer Data Redaction
+
+```typescript filename="app/routes/webhooks.customer_redact.ts"
+import type {ActionFunctionArgs} from '@remix-run/node';
+import {authenticate} from '~/shopify.server';
+import {logger} from '~/utils/logger.server';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Customer data redaction requested');
+
+  // Delete customer PII from your database
+  // Keep anonymized analytics data
+  // Remove customer from email lists
+
+  return new Response();
+};
+```
+
+### Shop Data Redaction
+
+```typescript filename="app/routes/webhooks.shop_redact.ts"
+import type {ActionFunctionArgs} from '@remix-run/node';
+import {authenticate} from '~/shopify.server';
+import {logger} from '~/utils/logger.server';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Shop data redaction requested');
+
+  // Delete all shop data after 48 hours
+  // Shopify gives 48 hours to complete this request
+
+  return new Response();
+};
+```
+
+<Warning>
+  GDPR compliance webhooks must be handled within 48 hours. Implement them even if you don't store customer data.
+</Warning>
+
+## Webhook Authentication
+
+Shopify CLI automatically validates webhook signatures:
+
+```typescript
+const {topic, shop, payload} = await authenticate.webhook(request);
+```
+
+The authenticate function:
+- Verifies HMAC signature
+- Extracts shop domain
+- Parses webhook payload
+- Throws error for invalid webhooks
+
+## Testing Webhooks Locally
+
+<Steps>
+  <Step title="Start development server">
+    ```bash
+    npm run dev
+    ```
+  </Step>
+
+  <Step title="Trigger test webhook">
+    Use Shopify CLI to send test webhooks:
+
+    ```bash
+    shopify app webhook trigger \
+      --topic subscription_billing_attempts/success \
+      --api-version unstable
+    ```
+  </Step>
+
+  <Step title="Check logs">
+    Monitor your console for webhook receipt and processing:
+
+    ```
+    [webhook] Received subscription_billing_attempts/success
+    [job] Starting DunningStopJob
+    [job] Completed DunningStopJob
+    ```
+  </Step>
+</Steps>
+
+## Webhook Job Pattern
+
+Most webhooks follow this pattern:
+
+```typescript
+export const action = async ({request}: ActionFunctionArgs) => {
+  // 1. Authenticate and extract payload
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  // 2. Log receipt
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // 3. Enqueue background job
+  jobs.enqueue(
+    new ProcessWebhookJob({
+      shop,
+      payload,
+    }),
+  );
+
+  // 4. Return quickly (< 5 seconds)
+  return new Response();
+};
+```
+
+<Tip>
+  Keep webhook handlers fast. Enqueue jobs for any processing that takes more than a second.
+</Tip>
+
+## Webhook Payloads
+
+Define TypeScript types for webhook payloads:
+
+```typescript filename="app/types/webhooks.ts"
+export namespace Webhooks {
+  export interface SubscriptionBillingAttemptFailure {
+    admin_graphql_api_id: string;
+    admin_graphql_api_contract_id: string;
+    billing_attempt_expected_date: string;
+    error_code: string;
+    error_message: string;
+  }
+
+  export interface SubscriptionBillingAttemptSuccess {
+    admin_graphql_api_id: string;
+    admin_graphql_api_contract_id: string;
+    admin_graphql_api_order_id: string;
+  }
+
+  export interface SellingPlanGroups {
+    admin_graphql_api_id: string;
+    admin_graphql_api_app: string;
+    id: number;
+    name: string;
+    merchant_code: string;
+  }
+}
+```
+
+## Webhook Retry Behavior
+
+Shopify automatically retries failed webhooks:
+- **First retry**: After 1 second
+- **Subsequent retries**: Exponential backoff up to 48 hours
+- **Max retries**: 19 attempts
+
+Ensure idempotency:
+
+```typescript
+export class ProcessWebhookJob extends Job {
+  async perform(): Promise<void> {
+    const {payload} = this.parameters;
+
+    // Check if already processed
+    const existing = await db.webhookEvent.findUnique({
+      where: {id: payload.admin_graphql_api_id},
+    });
+
+    if (existing) {
+      this.logger.info('Webhook already processed, skipping');
+      return;
+    }
+
+    // Process webhook
+    await processWebhook(payload);
+
+    // Mark as processed
+    await db.webhookEvent.create({
+      data: {id: payload.admin_graphql_api_id},
+    });
+  }
+}
+```
+
+## Monitoring Webhooks
+
+Track webhook processing in your logs:
+
+```typescript
+logger.info({
+  topic,
+  shop,
+  webhookId: payload.admin_graphql_api_id,
+  processingTime: Date.now() - startTime,
+}, 'Webhook processed successfully');
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Respond quickly">
+    Return a 200 response within 5 seconds. Use job queues for processing.
+  </Step>
+
+  <Step title="Implement idempotency">
+    Handle duplicate webhooks gracefully by checking if events were already processed.
+  </Step>
+
+  <Step title="Log everything">
+    Log webhook receipt, processing, and completion for debugging.
+  </Step>
+
+  <Step title="Handle errors gracefully">
+    Use job retry logic for transient errors. Terminal errors should not retry.
+  </Step>
+
+  <Step title="Test thoroughly">
+    Use Shopify CLI to trigger test webhooks during development.
+  </Step>
+</Steps>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Webhooks not received">
+    - Verify webhook configuration in `shopify.app.toml`
+    - Check that routes exist for all configured webhooks
+    - Ensure app is deployed and accessible
+    - Check Shopify Partner Dashboard for delivery status
+  </Accordion>
+
+  <Accordion title="Authentication failures">
+    - Verify HMAC signature validation is enabled
+    - Check that `authenticate.webhook()` is called correctly
+    - Ensure webhook secret is configured properly
+  </Accordion>
+
+  <Accordion title="Timeout errors">
+    - Move processing to background jobs
+    - Return response before starting heavy operations
+    - Use async job queues like Cloud Tasks
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Job Scheduling" icon="clock" href="/guides/job-scheduling">
+    Learn about background job processing for webhooks
+  </Card>
+  <Card title="Handling Billing Attempts" icon="credit-card" href="/guides/handling-billing-attempts">
+    Process billing attempt webhooks effectively
+  </Card>
+</CardGroup>

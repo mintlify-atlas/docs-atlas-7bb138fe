@@ -1,0 +1,633 @@
+---
+title: Customizing the Customer Portal
+description: Learn how to customize the buyer-facing subscription management UI using Shopify Customer Account UI Extensions
+---
+
+The customer portal allows buyers to manage their subscriptions directly, including pausing, resuming, cancelling, and updating delivery preferences. This guide covers customization of the buyer experience.
+
+## Overview
+
+The customer portal is built as a Customer Account UI Extension:
+- **Location**: `extensions/buyer-subscriptions/`
+- **Framework**: React with Shopify UI Extensions
+- **Entry Point**: Customer account page
+- **Features**: View subscriptions, manage delivery, skip orders, cancel
+
+## Extension Architecture
+
+```typescript filename="extensions/buyer-subscriptions/src/index.tsx"
+import {reactExtension} from '@shopify/ui-extensions-react/customer-account';
+import {Router} from './App';
+import {ErrorBoundary} from 'foundation/ErrorBoundary';
+
+export default reactExtension('customer-account.page.render', () => <App />);
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <Router />
+    </ErrorBoundary>
+  );
+}
+```
+
+### Router Implementation
+
+```typescript filename="extensions/buyer-subscriptions/src/App.tsx"
+import {SubscriptionList} from './SubscriptionList';
+import {SubscriptionDetails} from './SubscriptionDetails';
+import {useNavigationCurrentEntry} from '@shopify/ui-extensions-react/customer-account';
+
+export function Router() {
+  const currentEntry = useNavigationCurrentEntry();
+  const url = new URL(currentEntry.url);
+
+  if (url.pathname.includes('subscriptions')) {
+    const id = getSubscriptionIdFromPath(url.pathname);
+    return <SubscriptionDetails id={id} />;
+  }
+  
+  return <SubscriptionList />;
+}
+```
+
+## Subscription List View
+
+<Steps>
+  <Step title="Query customer subscriptions">
+    Load all subscriptions for the current customer:
+
+    ```graphql filename="SubscriptionListQuery.ts"
+    query SubscriptionList($customerId: ID!) {
+      customer(id: $customerId) {
+        subscriptionContracts(first: 10) {
+          edges {
+            node {
+              id
+              status
+              nextBillingDate
+              lines(first: 5) {
+                edges {
+                  node {
+                    id
+                    title
+                    variantTitle
+                    quantity
+                    currentPrice {
+                      amount
+                      currencyCode
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Render subscription cards">
+    Display each subscription with key details:
+
+    ```typescript filename="SubscriptionList.tsx"
+    export function SubscriptionList() {
+      const {subscriptions, loading} = useSubscriptionListData();
+
+      if (loading) return <SkeletonList />;
+
+      if (!subscriptions.length) {
+        return <SubscriptionListEmptyState />;
+      }
+
+      return (
+        <BlockStack spacing="base">
+          {subscriptions.map((subscription) => (
+            <SubscriptionListItem
+              key={subscription.id}
+              subscription={subscription}
+            />
+          ))}
+        </BlockStack>
+      );
+    }
+    ```
+  </Step>
+
+  <Step title="Add quick actions">
+    Include pause, resume, and view actions:
+
+    ```typescript filename="SubscriptionActions.tsx"
+    export function SubscriptionActions({subscription}: Props) {
+      const [pauseModalOpen, setPauseModalOpen] = useState(false);
+      const [cancelModalOpen, setCancelModalOpen] = useState(false);
+
+      return (
+        <>
+          <Button onPress={() => navigateToDetails(subscription.id)}>
+            View details
+          </Button>
+          
+          {subscription.status === 'ACTIVE' && (
+            <Button onPress={() => setPauseModalOpen(true)}>
+              Pause subscription
+            </Button>
+          )}
+
+          <PauseSubscriptionModal
+            open={pauseModalOpen}
+            subscriptionContractId={subscription.id}
+            onClose={() => setPauseModalOpen(false)}
+          />
+        </>
+      );
+    }
+    ```
+  </Step>
+</Steps>
+
+## Subscription Details View
+
+### Loading Subscription Data
+
+```typescript filename="hooks/useSubscriptionContract.ts"
+export function useSubscriptionContract(id: string) {
+  const {extensionApi} = useExtensionApi();
+  const [subscription, setSubscription] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchSubscription = useCallback(async () => {
+    setLoading(true);
+    
+    const result = await extensionApi.query(
+      SubscriptionDetailsQuery,
+      {variables: {id}},
+    );
+
+    if (result.data?.subscriptionContract) {
+      setSubscription(result.data.subscriptionContract);
+    }
+    
+    setLoading(false);
+  }, [id, extensionApi]);
+
+  useEffect(() => {
+    fetchSubscription();
+  }, [fetchSubscription]);
+
+  return {
+    subscription,
+    loading,
+    refetch: fetchSubscription,
+  };
+}
+```
+
+### Details Page Layout
+
+```typescript filename="SubscriptionDetails.tsx"
+export function SubscriptionDetails({id}: Props) {
+  const {subscription, loading, refetch} = useSubscriptionContract(id);
+
+  if (loading) return <SkeletonPage />;
+  if (!subscription) return <NotFound />;
+
+  return (
+    <BlockStack spacing="large">
+      <OverviewCard subscription={subscription} onRefetch={refetch} />
+      <UpcomingOrderCard subscription={subscription} />
+      <PriceSummaryCard subscription={subscription} />
+      <PastOrdersCard orders={subscription.orders} />
+    </BlockStack>
+  );
+}
+```
+
+## Customer Actions
+
+### Pausing Subscriptions
+
+```typescript filename="components/PauseSubscriptionModal/PauseSubscriptionModal.tsx"
+export function PauseSubscriptionModal({
+  open,
+  subscriptionContractId,
+  onClose,
+}: Props) {
+  const {extensionApi} = useExtensionApi();
+  const [loading, setLoading] = useState(false);
+  const {showSuccessToast} = useToast();
+
+  const handlePause = useCallback(async () => {
+    setLoading(true);
+
+    const result = await extensionApi.query(
+      PauseSubscriptionContractMutation,
+      {
+        variables: {subscriptionContractId},
+      },
+    );
+
+    if (result.data?.subscriptionContractPause?.userErrors.length === 0) {
+      showSuccessToast(SuccessToastType.SubscriptionPaused);
+      onClose();
+    } else {
+      // Handle errors
+    }
+
+    setLoading(false);
+  }, [subscriptionContractId, extensionApi]);
+
+  return (
+    <Modal
+      id="pause-subscription-modal"
+      title="Pause subscription"
+      padding
+      onClose={onClose}
+    >
+      <BlockStack spacing="base">
+        <Text>Your subscription will be paused until you resume it.</Text>
+        <InlineStack spacing="base">
+          <Button kind="secondary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button kind="primary" onPress={handlePause} loading={loading}>
+            Pause subscription
+          </Button>
+        </InlineStack>
+      </BlockStack>
+    </Modal>
+  );
+}
+```
+
+### Pause Mutation
+
+```graphql filename="graphql/PauseSubscriptionContractMutation.ts"
+mutation PauseSubscriptionContract($subscriptionContractId: ID!) {
+  subscriptionContractPause(subscriptionContractId: $subscriptionContractId) {
+    contract {
+      id
+      status
+    }
+    userErrors {
+      message
+    }
+  }
+}
+```
+
+### Cancelling Subscriptions
+
+```typescript filename="components/CancelSubscriptionModal/CancelSubscriptionModal.tsx"
+export function CancelSubscriptionModal(props: Props) {
+  const {extensionApi} = useExtensionApi();
+  const [loading, setLoading] = useState(false);
+  const {showSuccessToast} = useToast();
+
+  const handleCancel = useCallback(async () => {
+    setLoading(true);
+
+    const result = await extensionApi.query(
+      CancelSubscriptionMutation,
+      {
+        variables: {subscriptionContractId: props.subscriptionContractId},
+      },
+    );
+
+    const {userErrors} = result.data?.subscriptionContractCancel || {};
+
+    if (userErrors?.length === 0) {
+      showSuccessToast(SuccessToastType.SubscriptionCancelled);
+      props.onSuccess();
+    }
+
+    setLoading(false);
+  }, [props, extensionApi]);
+
+  return (
+    <Modal
+      id="cancel-subscription-modal"
+      title="Cancel subscription"
+      padding
+      onClose={props.onClose}
+    >
+      <BlockStack spacing="base">
+        <Text>
+          Are you sure you want to cancel? This action cannot be undone.
+        </Text>
+        <InlineStack spacing="base">
+          <Button kind="secondary" onPress={props.onClose}>
+            Keep subscription
+          </Button>
+          <Button 
+            kind="primary" 
+            onPress={handleCancel} 
+            loading={loading}
+            tone="critical"
+          >
+            Cancel subscription
+          </Button>
+        </InlineStack>
+      </BlockStack>
+    </Modal>
+  );
+}
+```
+
+### Skipping Orders
+
+```typescript filename="components/SkipNextOrderModal/SkipNextOrderModal.tsx"
+export function SkipNextOrderModal({open, billingCycle, onClose}: Props) {
+  const {extensionApi} = useExtensionApi();
+  const [loading, setLoading] = useState(false);
+
+  const handleSkip = useCallback(async () => {
+    setLoading(true);
+
+    const result = await extensionApi.query(
+      SkipBillingCycleMutation,
+      {
+        variables: {
+          subscriptionContractId: billingCycle.contractId,
+          billingCycleIndex: billingCycle.cycleIndex,
+        },
+      },
+    );
+
+    if (result.data?.subscriptionBillingCycleSkip?.userErrors.length === 0) {
+      showSuccessToast(SuccessToastType.OrderSkipped);
+      onClose();
+    }
+
+    setLoading(false);
+  }, [billingCycle, extensionApi]);
+
+  return (
+    <Modal id="skip-order-modal" title="Skip next order" onClose={onClose}>
+      <BlockStack spacing="base">
+        <Text>
+          Skip your order on {formatDate(billingCycle.billingDate)}?
+        </Text>
+        <InlineStack spacing="base">
+          <Button kind="secondary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button kind="primary" onPress={handleSkip} loading={loading}>
+            Skip order
+          </Button>
+        </InlineStack>
+      </BlockStack>
+    </Modal>
+  );
+}
+```
+
+## Updating Delivery Address
+
+Customers can update their delivery address:
+
+```typescript filename="components/DeliveryModal/DeliveryModal.tsx"
+export function DeliveryModal({
+  currentAddress,
+  subscriptionContractId,
+  onClose,
+  refetchSubscriptionContract,
+}: Props) {
+  const [loading, setLoading] = useState(false);
+  const [modalState, setModalState] = useState(DeliveryModalState.AddressInput);
+  const [newAddress, setNewAddress] = useState<Address>(currentAddress);
+  const [deliveryOptions, setDeliveryOptions] = useState<DeliveryOption[]>([]);
+  const [token, setToken] = useState<string>();
+
+  const getDeliveryOptions = useFetchDeliveryOptions();
+
+  const handleAddressSave = useCallback(async () => {
+    setLoading(true);
+
+    // Fetch available delivery methods for new address
+    const {
+      deliveryOptions,
+      deliveryOptionsToken,
+      errors,
+    } = await getDeliveryOptions(newAddress, subscriptionContractId);
+
+    setLoading(false);
+
+    if (errors.length === 0 && deliveryOptions.length > 0) {
+      setDeliveryOptions(deliveryOptions);
+      setToken(deliveryOptionsToken);
+      setModalState(DeliveryModalState.DeliveryMethodSelect);
+    }
+  }, [getDeliveryOptions, newAddress, subscriptionContractId]);
+
+  const modalContent = (() => {
+    switch (modalState) {
+      case DeliveryModalState.AddressInput:
+        return (
+          <AddressModal
+            address={newAddress}
+            onSave={handleAddressSave}
+            onClose={onClose}
+            loading={loading}
+          />
+        );
+      case DeliveryModalState.DeliveryMethodSelect:
+        return (
+          <DeliveryMethodSelectModal
+            address={newAddress}
+            deliveryOptions={deliveryOptions}
+            deliveryOptionsToken={token}
+            subscriptionContractId={subscriptionContractId}
+            onSuccess={() => {
+              refetchSubscriptionContract();
+              onClose();
+            }}
+          />
+        );
+    }
+  })();
+
+  return (
+    <Modal id="delivery-modal" padding title="Update delivery" onClose={onClose}>
+      {modalContent}
+    </Modal>
+  );
+}
+```
+
+<Note>
+  Address updates require fetching new delivery options and selecting a shipping method before saving.
+</Note>
+
+## API Communication
+
+The extension uses the Customer Account API:
+
+```typescript filename="foundation/Api/useExtensionApi.ts"
+export function useExtensionApi() {
+  const api = useApi();
+
+  const query = useCallback(
+    async (query: string, options: QueryOptions) => {
+      try {
+        const response = await api.query(query, options);
+        return response;
+      } catch (error) {
+        console.error('API Error:', error);
+        throw error;
+      }
+    },
+    [api],
+  );
+
+  return {
+    extensionApi: {query},
+    i18n: useTranslate(),
+  };
+}
+```
+
+## Styling and Theming
+
+Use Shopify UI Extension components for consistent styling:
+
+```typescript
+import {
+  BlockStack,
+  InlineStack,
+  Text,
+  Button,
+  Card,
+  Divider,
+} from '@shopify/ui-extensions-react/customer-account';
+
+<Card padding="base">
+  <BlockStack spacing="base">
+    <Text size="large" emphasis="bold">
+      Subscription Details
+    </Text>
+    <Divider />
+    <Text>Next delivery: {formatDate(nextBillingDate)}</Text>
+  </BlockStack>
+</Card>
+```
+
+<Tip>
+  UI Extension components automatically adapt to the store's theme and customer's preferences.
+</Tip>
+
+## Error Handling
+
+```typescript filename="foundation/ErrorBoundary.tsx"
+export class ErrorBoundary extends React.Component<Props, State> {
+  constructor(props: Props) {
+    super(props);
+    this.state = {hasError: false};
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return {hasError: true};
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Extension error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <BlockStack spacing="base">
+          <Text size="large">Something went wrong</Text>
+          <Button onPress={() => this.setState({hasError: false})}>
+            Try again
+          </Button>
+        </BlockStack>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+```
+
+## Toast Notifications
+
+```typescript filename="utilities/hooks/useToast.ts"
+export enum SuccessToastType {
+  SubscriptionPaused = 'subscription_paused',
+  SubscriptionResumed = 'subscription_resumed',
+  SubscriptionCancelled = 'subscription_cancelled',
+  OrderSkipped = 'order_skipped',
+  DeliveryUpdated = 'delivery_updated',
+}
+
+export function useToast() {
+  const {extensionApi} = useExtensionApi();
+
+  const showSuccessToast = useCallback(
+    (type: SuccessToastType) => {
+      extensionApi.toast.show(getToastMessage(type), {
+        duration: 3000,
+      });
+    },
+    [extensionApi],
+  );
+
+  return {showSuccessToast};
+}
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Provide clear feedback">
+    Use loading states and toast notifications for all actions.
+  </Step>
+
+  <Step title="Confirm destructive actions">
+    Always show a modal before cancelling or making permanent changes.
+  </Step>
+
+  <Step title="Handle errors gracefully">
+    Display user-friendly error messages and offer retry options.
+  </Step>
+
+  <Step title="Optimize performance">
+    Cache subscription data and only refetch when necessary.
+  </Step>
+
+  <Step title="Test thoroughly">
+    Test all flows with different subscription states and configurations.
+  </Step>
+</Steps>
+
+## Extension Configuration
+
+Define extension capabilities in the configuration:
+
+```toml filename="shopify.extension.toml"
+api_version = "2024-01"
+
+[[extensions]]
+type = "customer_account_ui_extension"
+name = "buyer-subscriptions"
+handle = "buyer-subscriptions"
+
+[extensions.settings]
+[[extensions.settings.fields]]
+key = "title"
+type = "single_line_text_field"
+name = "Title"
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Setting Up Webhooks" icon="webhook" href="/guides/setting-up-webhooks">
+    Configure webhooks to sync extension data
+  </Card>
+  <Card title="Managing Contracts" icon="file-contract" href="/guides/managing-contracts">
+    Learn about merchant-side contract management
+  </Card>
+</CardGroup>

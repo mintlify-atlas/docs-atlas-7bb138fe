@@ -1,0 +1,662 @@
+---
+title: Webhook Integration
+description: Handle subscription lifecycle events with webhook handlers and background job processing
+---
+
+The Shopify Subscriptions Reference App uses webhooks to respond to subscription events, process billing attempts, and maintain data consistency across the platform.
+
+## Overview
+
+<CardGroup cols={2}>
+  <Card title="Subscription Events" icon="bell" href="#subscription-webhooks">
+    Contract create, activate, pause, and cancel events
+  </Card>
+  <Card title="Billing Events" icon="credit-card" href="#billing-webhooks">
+    Billing attempt success and failure handling
+  </Card>
+  <Card title="Selling Plans" icon="calendar-days" href="#selling-plan-webhooks">
+    Selling plan group creation and updates
+  </Card>
+  <Card title="Compliance" icon="shield-halved" href="#compliance-webhooks">
+    GDPR data request and redaction
+  </Card>
+</CardGroup>
+
+## Webhook Configuration
+
+Webhooks are configured in `shopify.app.toml`:
+
+```toml
+[webhooks]
+api_version = "unstable"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_contracts/create" ]
+  uri = "/webhooks/subscription_contracts/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_contracts/activate" ]
+  uri = "/webhooks/subscription_contracts/activate"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_contracts/cancel" ]
+  uri = "/webhooks/subscription_contracts/cancel"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_contracts/pause" ]
+  uri = "/webhooks/subscription_contracts/pause"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_billing_cycles/skip" ]
+  uri = "/webhooks/subscription_billing_cycles/skip"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_billing_attempts/success" ]
+  uri = "/webhooks/subscription_billing_attempts/success"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_billing_attempts/failure" ]
+  uri = "/webhooks/subscription_billing_attempts/failure"
+
+  [[webhooks.subscriptions]]
+  topics = [ "selling_plan_groups/create", "selling_plan_groups/update" ]
+  uri = "/webhooks/selling_plan_groups/create_or_update"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customer_redact"
+  compliance_topics = [ "customers/data_request", "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/shop_redact"
+  compliance_topics = [ "shop/redact" ]
+```
+
+### API Version
+
+<ParamField path="api_version" type="string" default="unstable">
+  Shopify Admin API version for webhook payloads
+</ParamField>
+
+<Note>
+Using `unstable` API version provides access to the latest subscription features but may include breaking changes.
+</Note>
+
+## Subscription Webhooks
+
+### Contract Creation
+
+Handles new subscription contract creation and sends welcome emails.
+
+<CodeGroup>
+```typescript Route Handler
+// app/routes/webhooks.subscription_contracts.create.tsx
+import {authenticate} from '~/shopify.server';
+import {CustomerSendEmailJob, TagSubscriptionOrderJob, jobs} from '~/jobs';
+import {CustomerEmailTemplateName} from '~/services/CustomerSendEmailService';
+import {FIRST_ORDER_TAGS} from '~/jobs/tags/constants';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  const {admin_graphql_api_origin_order_id: orderId} = payload;
+  
+  if (orderIsFromCheckout(orderId)) {
+    jobs.enqueue(
+      new CustomerSendEmailJob({
+        shop,
+        payload: {
+          ...(payload as Webhooks.SubscriptionContractsCreate),
+          emailTemplate: CustomerEmailTemplateName.NewSubscription,
+        },
+      })
+    );
+  }
+
+  jobs.enqueue(
+    new TagSubscriptionOrderJob({
+      shop,
+      payload: {
+        orderId: payload.admin_graphql_api_origin_order_id,
+        tags: FIRST_ORDER_TAGS,
+      },
+    })
+  );
+
+  return new Response();
+};
+
+function orderIsFromCheckout(orderId: string | null): boolean {
+  return orderId !== null;
+}
+```
+
+```typescript Webhook Payload
+interface SubscriptionContractsCreate {
+  admin_graphql_api_id: string;
+  admin_graphql_api_origin_order_id: string | null;
+  admin_graphql_api_customer_id: string;
+  status: string;
+  billing_policy: BillingPolicy;
+  delivery_policy: DeliveryPolicy;
+  lines: SubscriptionLine[];
+}
+```
+</CodeGroup>
+
+**Processing flow:**
+
+<Steps>
+  <Step title="Authenticate Webhook">
+    Verify webhook authenticity via Shopify authentication
+  </Step>
+  
+  <Step title="Check Origin Order">
+    Determine if subscription was created from checkout
+  </Step>
+  
+  <Step title="Send Welcome Email">
+    Enqueue customer email job for new subscriptions
+  </Step>
+  
+  <Step title="Tag Order">
+    Add subscription tags to the origin order
+  </Step>
+</Steps>
+
+### Contract Activation
+
+```typescript
+// Handles subscription_contracts/activate
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // Process activation logic
+  // - Update internal state
+  // - Send activation email
+  // - Trigger analytics events
+
+  return new Response();
+};
+```
+
+### Contract Pause
+
+```typescript
+// Handles subscription_contracts/pause
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // Process pause logic
+  // - Update subscription status
+  // - Schedule resume notifications
+  // - Track pause metrics
+
+  return new Response();
+};
+```
+
+### Contract Cancellation
+
+```typescript
+// Handles subscription_contracts/cancel
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // Process cancellation logic
+  // - Update subscription status
+  // - Send cancellation confirmation
+  // - Track churn metrics
+
+  return new Response();
+};
+```
+
+## Billing Webhooks
+
+### Billing Attempt Success
+
+Handles successful billing attempts and stops dunning processes.
+
+```typescript
+// app/routes/webhooks.subscription_billing_attempts.success.tsx
+import {DunningStopJob, TagSubscriptionOrderJob, jobs} from '~/jobs';
+import {RECURRING_ORDER_TAGS} from '~/jobs/tags/constants';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  jobs.enqueue(
+    new DunningStopJob({
+      shop,
+      payload: payload as Webhooks.SubscriptionBillingAttemptSuccess,
+    }),
+  );
+
+  jobs.enqueue(
+    new TagSubscriptionOrderJob({
+      shop,
+      payload: {
+        orderId: payload.admin_graphql_api_order_id,
+        tags: RECURRING_ORDER_TAGS,
+      },
+    }),
+  );
+
+  return new Response();
+};
+```
+
+**Jobs executed:**
+
+<AccordionGroup>
+  <Accordion title="DunningStopJob">
+    Stops dunning/retry processes for subscriptions that had previous failed billing attempts.
+
+    ```typescript
+    export class DunningStopJob extends Job<
+      Jobs.Parameters<Webhooks.SubscriptionBillingAttemptSuccess>
+    > {
+      public queue: string = 'webhooks';
+
+      async perform(): Promise<void> {
+        const {shop, payload} = this.parameters;
+        const {admin_graphql_api_contract_id} = payload;
+        
+        // Clear failed billing attempt flags
+        // Reset retry counters
+        // Send recovery notification
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="TagSubscriptionOrderJob">
+    Tags recurring subscription orders for reporting and filtering.
+
+    ```typescript
+    // RECURRING_ORDER_TAGS
+    export const RECURRING_ORDER_TAGS = [
+      'subscription',
+      'recurring_order',
+    ];
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Billing Attempt Failure
+
+```typescript
+// Handles subscription_billing_attempts/failure
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  jobs.enqueue(
+    new DunningStartJob({
+      shop,
+      payload: payload as Webhooks.SubscriptionBillingAttemptFailure,
+    }),
+  );
+
+  return new Response();
+};
+```
+
+**Failure handling:**
+- Track failed billing attempt count
+- Initiate dunning sequence
+- Send payment failure notifications
+- Update subscription status
+- Schedule retry attempts
+
+### Billing Cycle Skip
+
+```typescript
+// Handles subscription_billing_cycles/skip
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  // Process skip logic
+  // - Update billing schedule
+  // - Notify customer of skip confirmation
+  // - Adjust inventory forecasting
+
+  return new Response();
+};
+```
+
+## Selling Plan Webhooks
+
+Handles selling plan group creation and updates with automatic translation generation.
+
+```typescript
+// app/routes/webhooks.selling_plan_groups.create_or_update.tsx
+import {CreateSellingPlanTranslationsJob, jobs} from '~/jobs';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received webhook');
+
+  jobs.enqueue(
+    new CreateSellingPlanTranslationsJob({
+      shop,
+      payload: payload as Webhooks.SellingPlanGroups,
+    }),
+  );
+
+  return new Response();
+};
+```
+
+### Translation Generation Job
+
+The `CreateSellingPlanTranslationsJob` generates localized selling plan descriptions:
+
+```typescript
+// app/jobs/webhooks/CreateSellingPlanTranslationsJob.ts
+export class CreateSellingPlanTranslationsJob extends Job<
+  Jobs.Parameters<Webhooks.SellingPlanGroups>
+> {
+  public queue: string = 'webhooks';
+
+  async perform(): Promise<void> {
+    const {shop, payload} = this.parameters;
+    const {
+      admin_graphql_api_id: sellingPlanGroupId,
+      admin_graphql_api_app: appGid,
+    } = payload;
+
+    // Verify webhook is from subscriptions app
+    if (appGid !== env.appGID) {
+      this.logger.info(
+        {subscriptionAppID: env.appGID, sourceAppID: appGid},
+        'Not creating translation since event is not from subscriptions app',
+      );
+      return;
+    }
+
+    const {admin} = await unauthenticated.admin(shop);
+    const {shopLocalesWithoutPrimary} = await getShopLocales(admin.graphql);
+    const {shop: shopInfo} = await getShopInfos(admin.graphql);
+
+    const response = await admin.graphql(SellingPlanTranslations, {
+      variables: {id: sellingPlanGroupId},
+    });
+
+    const json = await response.json();
+    const sellingPlanNodes = nodesFromEdges(
+      json.data?.sellingPlanGroup?.sellingPlans.edges || [],
+    );
+
+    const sellingPlans = sellingPlanNodes.map((plan) => ({
+      id: plan.id,
+      pricingPolicies: plan.pricingPolicies as SellingPlanPricingPolicy[],
+      deliveryPolicy: plan.deliveryPolicy as RecurringPolicy,
+    }));
+
+    await createSellingPlanTranslations(
+      admin.graphql,
+      sellingPlans,
+      shopLocalesWithoutPrimary,
+      shopInfo.currencyCode,
+    );
+  }
+}
+```
+
+**Translation process:**
+
+<Steps>
+  <Step title="Verify App Source">
+    Check that webhook originated from subscriptions app
+  </Step>
+  
+  <Step title="Query Shop Locales">
+    Fetch all shop locales excluding primary language
+  </Step>
+  
+  <Step title="Fetch Selling Plans">
+    Retrieve selling plan details including pricing and delivery policies
+  </Step>
+  
+  <Step title="Generate Translations">
+    Create localized descriptions for each selling plan in all shop locales
+  </Step>
+</Steps>
+
+<Note>
+Translations are generated for all shop locales to provide a localized checkout experience for international customers.
+</Note>
+
+## Compliance Webhooks
+
+### Customer Data Request / Redact
+
+```typescript
+// app/routes/webhooks.customer_redact.ts
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received GDPR webhook');
+
+  const {customer_id, orders_requested} = payload;
+
+  // Process customer data request
+  // - Gather subscription data
+  // - Compile order history
+  // - Generate data export
+  // - Delete customer data (for redact)
+
+  return new Response();
+};
+```
+
+### Shop Redact
+
+```typescript
+// app/routes/webhooks.shop_redact.ts
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'Received shop redact webhook');
+
+  // Process shop data deletion
+  // - Delete all shop subscriptions
+  // - Remove billing schedules
+  // - Clear shop settings
+  // - Archive necessary records for compliance
+
+  return new Response();
+};
+```
+
+### App Uninstalled
+
+```typescript
+// Handles app/uninstalled
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  logger.info({topic, shop, payload}, 'App uninstalled');
+
+  // Cleanup logic
+  // - Deactivate billing schedules
+  // - Cancel webhook subscriptions
+  // - Archive shop data
+  // - Send uninstall notification
+
+  return new Response();
+};
+```
+
+## Background Job Processing
+
+All webhook handlers enqueue background jobs for asynchronous processing:
+
+```typescript
+import {jobs} from '~/jobs';
+import {CustomerSendEmailJob} from '~/jobs';
+
+jobs.enqueue(
+  new CustomerSendEmailJob({
+    shop,
+    payload: {
+      admin_graphql_api_id: contractId,
+      admin_graphql_api_customer_id: customerId,
+      emailTemplate: 'SUBSCRIPTION_PAUSED',
+    },
+  })
+);
+```
+
+### Job Queue Configuration
+
+<Tabs>
+  <Tab title="Webhook Queue">
+    High-priority queue for webhook processing:
+
+    ```typescript
+    export class CreateSellingPlanTranslationsJob extends Job {
+      public queue: string = 'webhooks';
+      // ...
+    }
+    ```
+  </Tab>
+
+  <Tab title="Email Queue">
+    Dedicated queue for customer emails:
+
+    ```typescript
+    export class CustomerSendEmailJob extends Job {
+      public queue: string = 'emails';
+      // ...
+    }
+    ```
+  </Tab>
+
+  <Tab title="Default Queue">
+    General-purpose job queue:
+
+    ```typescript
+    export class TagSubscriptionOrderJob extends Job {
+      public queue: string = 'default';
+      // ...
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Webhook Security
+
+All webhook handlers use Shopify's authentication:
+
+```typescript
+import {authenticate} from '~/shopify.server';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+  
+  // Webhook is verified and authenticated
+  // Process payload safely
+};
+```
+
+**Security features:**
+- HMAC signature verification
+- Shop domain validation
+- API version compatibility checks
+- Payload integrity validation
+
+## Error Handling
+
+```typescript
+export const action = async ({request}: ActionFunctionArgs) => {
+  try {
+    const {topic, shop, payload} = await authenticate.webhook(request);
+    logger.info({topic, shop, payload}, 'Received webhook');
+
+    // Process webhook
+    await processWebhook(shop, payload);
+
+    return new Response(null, {status: 200});
+  } catch (error) {
+    logger.error({error}, 'Failed to process webhook');
+    
+    // Return 500 to trigger Shopify retry
+    return new Response(null, {status: 500});
+  }
+};
+```
+
+<Warning>
+Returning a non-2xx status code will cause Shopify to retry the webhook delivery according to their retry policy.
+</Warning>
+
+## Webhook Logging
+
+All webhook handlers include comprehensive logging:
+
+```typescript
+import {logger} from '~/utils/logger.server';
+
+logger.info({topic, shop, payload}, 'Received webhook');
+logger.error({error, shop, topic}, 'Webhook processing failed');
+```
+
+## Testing Webhooks
+
+<CodeGroup>
+```bash Trigger Test Webhook
+# Using Shopify CLI
+shopify webhook trigger --topic subscription_contracts/create
+```
+
+```bash View Webhook Logs
+# View logs in development
+shopify app dev --verbose
+```
+
+```typescript Mock Webhook Request
+import {action} from './webhooks.subscription_contracts.create';
+
+const mockRequest = new Request('http://localhost/webhooks', {
+  method: 'POST',
+  headers: {
+    'X-Shopify-Topic': 'subscription_contracts/create',
+    'X-Shopify-Shop-Domain': 'example.myshopify.com',
+  },
+  body: JSON.stringify(mockPayload),
+});
+
+await action({request: mockRequest});
+```
+</CodeGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Contract Management" icon="file-contract" href="/features/contract-management">
+    Subscription contract services
+  </Card>
+  <Card title="Billing Schedule" icon="calendar" href="/features/billing-schedule">
+    Billing cycle management
+  </Card>
+</CardGroup>

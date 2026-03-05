@@ -1,0 +1,611 @@
+---
+title: Job Scheduling System
+description: Learn how to use the job runner system for background processing, scheduled tasks, and webhook handling
+---
+
+The job runner system handles background processing for webhooks, billing operations, email notifications, and scheduled tasks. This guide covers creating and managing jobs.
+
+## Overview
+
+The job system provides:
+- **Asynchronous processing**: Handle long-running tasks outside request lifecycle
+- **Retry logic**: Automatic retry with terminal error detection
+- **Multiple schedulers**: Inline, test, and Cloud Tasks schedulers
+- **Custom queues**: Separate queues for different job types
+- **Logging**: Structured logging for debugging
+
+## Job Architecture
+
+```typescript
+graph LR
+    A[Webhook/Route] --> B[Enqueue Job]
+    B --> C[Scheduler]
+    C --> D[Job Queue]
+    D --> E[Job Runner]
+    E --> F[Execute Job]
+    F --> G{Success?}
+    G -->|Yes| H[Complete]
+    G -->|No| I{Terminal?}
+    I -->|Yes| H
+    I -->|No| J[Retry]
+    J --> D
+```
+
+## Creating a Job
+
+<Steps>
+  <Step title="Define job parameters">
+    Create a TypeScript type for your job parameters:
+
+    ```typescript filename="app/types/jobs.ts"
+    export namespace Jobs {
+      export interface RebillSubscriptionJobPayload {
+        subscriptionContractId: string;
+        originTime: string;
+      }
+
+      export interface Parameters<T> {
+        shop: string;
+        payload: T;
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Extend the Job class">
+    Create a job class that extends the base `Job` class:
+
+    ```typescript filename="app/jobs/billing/RebillSubscriptionJob.ts"
+    import {Job} from '~/lib/jobs';
+    import type {Jobs} from '~/types';
+
+    export class RebillSubscriptionJob extends Job<
+      Jobs.Parameters<Jobs.RebillSubscriptionJobPayload>
+    > {
+      public queue: string = 'rebilling';
+
+      async perform(): Promise<void> {
+        const {shop, payload} = this.parameters;
+        const {subscriptionContractId, originTime} = payload;
+
+        this.logger.info('Starting rebill job');
+
+        // Your job logic here
+        const {admin} = await unauthenticated.admin(shop);
+        
+        const response = await admin.graphql(
+          SubscriptionBillingCycleChargeMutation,
+          {
+            variables: {
+              subscriptionContractId,
+              originTime,
+            },
+          },
+        );
+
+        const {data} = await response.json();
+        // Handle response...
+
+        this.logger.info('Completed rebill job');
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Export the job">
+    Export your job from the jobs index:
+
+    ```typescript filename="app/jobs/index.ts"
+    export * from './billing/RebillSubscriptionJob';
+    export * from './billing/ChargeBillingCyclesJob';
+    export * from './dunning/DunningStartJob';
+    // ... other jobs
+    ```
+  </Step>
+</Steps>
+
+## Job Class Structure
+
+The base `Job` class provides core functionality:
+
+```typescript filename="app/lib/jobs/Job.ts"
+export abstract class Job<T = unknown> {
+  parameters: T;
+  public jobName: string;
+  public queue: string = 'default';
+
+  constructor(parameters: T) {
+    this.jobName = this.constructor.name;
+    this.parameters = parameters;
+  }
+
+  async run(): Promise<void> {
+    this.logger.info(`Starting ${this.jobName}`);
+
+    try {
+      await this.perform();
+      this.logger.info(`Completed ${this.jobName}`);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+
+      if (isTerminal(error)) {
+        this.logger.warn({error}, `Terminated ${this.jobName}`);
+        return; // Do not retry
+      }
+
+      this.logger.error({error}, `Failed ${this.jobName}`);
+      throw error; // Retry
+    }
+  }
+
+  get logger(): Logger {
+    return logger.child({
+      job: this.jobName,
+      parameters: this.parameters,
+    });
+  }
+
+  abstract perform(): Promise<void>;
+}
+```
+
+<Note>
+  Override the `queue` property to assign jobs to specific queues. Default is `'default'`.
+</Note>
+
+## Enqueueing Jobs
+
+### From a Route
+
+```typescript filename="app/routes/webhooks.subscription_billing_attempts.failure.tsx"
+import {DunningStartJob, jobs} from '~/jobs';
+
+export const action = async ({request}: ActionFunctionArgs) => {
+  const {topic, shop, payload} = await authenticate.webhook(request);
+
+  jobs.enqueue(
+    new DunningStartJob({
+      shop,
+      payload: payload as Webhooks.SubscriptionBillingAttemptFailure,
+    }),
+  );
+
+  return new Response();
+};
+```
+
+### With Scheduling Options
+
+```typescript
+// Schedule for future execution
+const scheduleTime = DateTime.now().plus({hours: 2}).toUnixInteger();
+
+await jobs.enqueue(
+  new RebillSubscriptionJob({shop, payload}),
+  {
+    scheduleTime: {seconds: scheduleTime},
+  },
+);
+
+// Set custom dispatch deadline (Cloud Tasks only)
+await jobs.enqueue(
+  new LongRunningJob({shop, payload}),
+  {
+    dispatchDeadline: {
+      seconds: Duration.fromObject({minutes: 30}).as('seconds'),
+    },
+  },
+);
+```
+
+## Schedulers
+
+### Inline Scheduler
+
+For local development - executes jobs immediately:
+
+```typescript filename="Development setup"
+import {InlineScheduler, JobRunner} from '~/lib/jobs';
+
+const scheduler = new InlineScheduler(logger);
+const runner = new JobRunner(scheduler, logger);
+
+runner.register(
+  RebillSubscriptionJob,
+  ChargeBillingCyclesJob,
+  DunningStartJob,
+);
+
+const job = new RebillSubscriptionJob({shop, payload});
+await runner.enqueue(job); // Executes immediately
+```
+
+### Test Scheduler
+
+For testing - stores jobs for inspection:
+
+```typescript filename="Test setup"
+import {TestScheduler, JobRunner} from '~/lib/jobs';
+
+const scheduler = new TestScheduler(logger);
+const runner = new JobRunner(scheduler, logger);
+
+runner.register(RebillSubscriptionJob);
+
+const job = new RebillSubscriptionJob({shop, payload});
+const request = await runner.enqueue(job);
+
+// Execute manually in test
+await runner.execute(request);
+```
+
+### Cloud Task Scheduler
+
+For production - uses Google Cloud Tasks:
+
+```typescript filename="Production setup"
+import {CloudTaskScheduler, JobRunner} from '~/lib/jobs';
+import type {CloudTaskSchedulerConfig} from '~/lib/jobs';
+
+const config: CloudTaskSchedulerConfig = {
+  location: 'us-central1',
+  projectId: 'your-project-id',
+  queuePrefix: 'subscriptions',
+  callbackUrl: 'https://your-app.com/internal/jobs/run',
+  serviceAccountEmail: 'jobs@your-project.iam.gserviceaccount.com',
+  audience: 'https://your-app.com/',
+};
+
+const scheduler = new CloudTaskScheduler(logger, config);
+const runner = new JobRunner(scheduler, logger);
+
+runner.register(
+  RebillSubscriptionJob,
+  ChargeBillingCyclesJob,
+);
+
+const job = new RebillSubscriptionJob({shop, payload});
+await runner.enqueue(job); // Creates Cloud Task
+```
+
+## Job Execution Route
+
+Create a route to execute jobs from Cloud Tasks:
+
+```typescript filename="app/routes/internal.jobs.run.tsx"
+import type {ActionFunctionArgs} from '@remix-run/node';
+import {CloudTaskScheduler, JobRunner} from '~/lib/jobs';
+import {logger} from '~/utils/logger.server';
+import * as Jobs from '~/jobs';
+
+export async function action({request}: ActionFunctionArgs) {
+  const config = {
+    location: process.env.CLOUD_TASKS_LOCATION!,
+    projectId: process.env.GCP_PROJECT_ID!,
+    queuePrefix: process.env.CLOUD_TASKS_QUEUE_PREFIX!,
+    callbackUrl: process.env.CLOUD_TASKS_CALLBACK_URL!,
+    serviceAccountEmail: process.env.CLOUD_TASKS_SERVICE_ACCOUNT!,
+    audience: process.env.CLOUD_TASKS_AUDIENCE!,
+  };
+
+  const scheduler = new CloudTaskScheduler(logger, config);
+  const runner = new JobRunner(scheduler, logger);
+
+  // Register all job classes
+  runner.register(
+    Jobs.RebillSubscriptionJob,
+    Jobs.ChargeBillingCyclesJob,
+    Jobs.DunningStartJob,
+    Jobs.DunningStopJob,
+    Jobs.CreateSellingPlanTranslationsJob,
+    // ... all other jobs
+  );
+
+  try {
+    await runner.execute(request);
+    return new Response(null, {status: 200});
+  } catch (error) {
+    logger.error({error}, 'Job execution failed');
+    return new Response(null, {status: 500});
+  }
+}
+```
+
+<Warning>
+  Protect the job execution route with authentication in production. Only Cloud Tasks should access it.
+</Warning>
+
+## Custom Queues
+
+<Steps>
+  <Step title="Define queue in infrastructure">
+    ```yaml filename="infrastructure/cloud-tasks.yaml"
+    queues:
+      - default
+      - billing
+      - rebilling
+      - webhooks
+      - email
+    ```
+  </Step>
+
+  <Step title="Assign job to queue">
+    ```typescript
+    export class RebillSubscriptionJob extends Job {
+      public queue: string = 'rebilling';
+      
+      async perform(): Promise<void> {
+        // Job logic
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Configure queue settings">
+    Each queue can have different rate limits and retry policies.
+  </Step>
+</Steps>
+
+## Error Handling
+
+### Terminal Errors
+
+Some errors should not trigger retries:
+
+```typescript filename="app/lib/jobs/Job.ts"
+export function isTerminal(error: Error): boolean {
+  return (
+    error instanceof SessionNotFoundError ||
+    (error instanceof HttpResponseError && isNonRetryable(error)) ||
+    error instanceof MaxMetaobjectDefinitionsExceededError
+  );
+}
+
+function isNonRetryable(error: HttpResponseError): boolean {
+  return [
+    401, // Unauthorized
+    402, // Shop frozen
+    403, // No access
+    404, // Not found
+    423, // Shop locked
+  ].includes(error.response.code);
+}
+```
+
+### Job-Specific Error Handling
+
+```typescript
+export class RebillSubscriptionJob extends Job {
+  async perform(): Promise<void> {
+    const {subscriptionContractId} = this.parameters.payload;
+
+    try {
+      const response = await admin.graphql(BillingMutation, {variables});
+      const {userErrors} = await response.json();
+
+      // Handle terminal errors
+      if (
+        userErrors.some(
+          (error) =>
+            error.code === 'CONTRACT_PAUSED' ||
+            error.code === 'CONTRACT_TERMINATED',
+        )
+      ) {
+        this.logger.warn('Contract terminated, stopping retries');
+        return; // Don't throw = don't retry
+      }
+
+      if (userErrors.length > 0) {
+        throw new Error('Billing failed'); // Will retry
+      }
+    } catch (error) {
+      this.logger.error({error}, 'Failed to process job');
+      throw error; // Will retry
+    }
+  }
+}
+```
+
+## Example Jobs
+
+### Billing Job
+
+```typescript filename="app/jobs/billing/ChargeBillingCyclesJob.ts"
+export class ChargeBillingCyclesJob extends Job {
+  public queue: string = 'billing';
+
+  async perform(): Promise<void> {
+    const {shop, payload} = this.parameters;
+    const {startDate, endDate} = payload;
+
+    const {admin} = await unauthenticated.admin(shop);
+
+    const response = await admin.graphql(ChargeBillingCyclesMutation, {
+      variables: {
+        startDate,
+        endDate,
+        contractStatus: ['ACTIVE'],
+        billingCycleStatus: ['UNBILLED'],
+        billingAttemptStatus: 'NO_ATTEMPT',
+      },
+    });
+
+    const json = await response.json();
+    const {job, userErrors} = json.data?.subscriptionBillingCycleBulkCharge;
+
+    if (userErrors.length === 0 && job?.id) {
+      this.logger.info(
+        `Created subscriptionBillingCycleBulkCharge job: ${job.id}`,
+      );
+    } else {
+      throw new Error('Failed to process ChargeBillingCyclesJob');
+    }
+  }
+}
+```
+
+### Email Job
+
+```typescript filename="app/jobs/email/CustomerSendEmailJob.ts"
+export class CustomerSendEmailJob extends Job {
+  public queue: string = 'email';
+
+  async perform(): Promise<void> {
+    const {shop, payload} = this.parameters;
+    const {customerId, emailType, data} = payload;
+
+    this.logger.info({customerId, emailType}, 'Sending customer email');
+
+    const emailTemplate = await getEmailTemplate(emailType);
+    const renderedEmail = await renderTemplate(emailTemplate, data);
+
+    await sendEmail({
+      to: data.customerEmail,
+      subject: emailTemplate.subject,
+      html: renderedEmail,
+    });
+
+    this.logger.info('Email sent successfully');
+  }
+}
+```
+
+### Dunning Job
+
+```typescript filename="app/jobs/dunning/DunningStartJob.ts"
+export class DunningStartJob extends Job {
+  public queue: string = 'dunning';
+
+  async perform(): Promise<void> {
+    const {shop, payload} = this.parameters;
+    const {admin_graphql_api_id, billing_attempt_expected_date} = payload;
+
+    // Schedule retry attempts
+    const retrySchedule = [
+      {delay: 1, unit: 'days'},
+      {delay: 3, unit: 'days'},
+      {delay: 7, unit: 'days'},
+    ];
+
+    for (const {delay, unit} of retrySchedule) {
+      const scheduleTime = DateTime.now()
+        .plus({[unit]: delay})
+        .toUnixInteger();
+
+      await runner.enqueue(
+        new RebillSubscriptionJob({
+          shop,
+          payload: {
+            subscriptionContractId: admin_graphql_api_id,
+            originTime: billing_attempt_expected_date,
+          },
+        }),
+        {
+          scheduleTime: {seconds: scheduleTime},
+        },
+      );
+    }
+
+    this.logger.info('Dunning workflow scheduled');
+  }
+}
+```
+
+## Job Runner Setup
+
+Initialize the global job runner:
+
+```typescript filename="app/jobs/index.ts"
+import {CloudTaskScheduler, JobRunner} from '~/lib/jobs';
+import {logger} from '~/utils/logger.server';
+
+const config = {
+  location: process.env.CLOUD_TASKS_LOCATION!,
+  projectId: process.env.GCP_PROJECT_ID!,
+  queuePrefix: process.env.CLOUD_TASKS_QUEUE_PREFIX!,
+  callbackUrl: process.env.CLOUD_TASKS_CALLBACK_URL!,
+  serviceAccountEmail: process.env.CLOUD_TASKS_SERVICE_ACCOUNT!,
+  audience: process.env.CLOUD_TASKS_AUDIENCE!,
+};
+
+const scheduler = new CloudTaskScheduler(logger, config);
+export const jobs = new JobRunner(scheduler, logger);
+
+// Register all jobs
+jobs.register(
+  RebillSubscriptionJob,
+  ChargeBillingCyclesJob,
+  DunningStartJob,
+  // ... all other jobs
+);
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Keep jobs focused">
+    Each job should do one thing well. Create separate jobs for different concerns.
+  </Step>
+
+  <Step title="Use appropriate queues">
+    Separate critical jobs (billing) from non-critical jobs (analytics) using different queues.
+  </Step>
+
+  <Step title="Implement idempotency">
+    Jobs may be retried. Ensure they can safely run multiple times.
+  </Step>
+
+  <Step title="Log extensively">
+    Use structured logging to track job execution and debug failures.
+  </Step>
+
+  <Step title="Handle terminal errors">
+    Don't retry errors that will always fail (404, cancelled contracts, etc.).
+  </Step>
+</Steps>
+
+## Testing Jobs
+
+Use the test scheduler for unit testing:
+
+```typescript filename="app/jobs/billing/tests/RebillSubscriptionJob.test.ts"
+import {TestScheduler, JobRunner} from '~/lib/jobs';
+import {RebillSubscriptionJob} from '../RebillSubscriptionJob';
+
+describe('RebillSubscriptionJob', () => {
+  let scheduler: TestScheduler;
+  let runner: JobRunner<TestScheduler>;
+
+  beforeEach(() => {
+    scheduler = new TestScheduler(logger);
+    runner = new JobRunner(scheduler, logger);
+    runner.register(RebillSubscriptionJob);
+  });
+
+  it('rebills a subscription contract', async () => {
+    const job = new RebillSubscriptionJob({
+      shop: 'test-shop.myshopify.com',
+      payload: {
+        subscriptionContractId: 'gid://shopify/SubscriptionContract/1',
+        originTime: '2024-01-01T00:00:00Z',
+      },
+    });
+
+    const request = await runner.enqueue(job);
+    await runner.execute(request);
+
+    // Assert expected outcomes
+  });
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Setting Up Webhooks" icon="webhook" href="/guides/setting-up-webhooks">
+    Learn how webhooks trigger jobs
+  </Card>
+  <Card title="Handling Billing Attempts" icon="credit-card" href="/guides/handling-billing-attempts">
+    Understand billing jobs in detail
+  </Card>
+</CardGroup>

@@ -1,0 +1,164 @@
+---
+title: Introduction
+description: Learn about the Shopify Subscriptions Reference App and how it can help you build custom subscription solutions for Shopify merchants
+---
+
+## Overview
+
+The Shopify Subscriptions Reference App is a comprehensive example application that demonstrates how to build a fully-featured subscription management system for Shopify. Built with Remix, this reference app includes the core functionality of the official Shopify Subscriptions app and serves as both a learning resource and a foundation for building custom subscription solutions.
+
+<Note>
+This is a reference implementation provided by Shopify to help developers understand best practices for building subscription apps. It includes production-ready patterns for subscription management, billing, and customer interactions.
+</Note>
+
+## What It Does
+
+The Subscriptions Reference App provides a complete subscription management system with:
+
+<CardGroup cols={2}>
+  <Card title="Selling Plans" icon="calendar-days">
+    Create and manage subscription selling plans with flexible billing and delivery frequencies
+  </Card>
+  <Card title="Contract Management" icon="file-contract">
+    Handle subscription contracts throughout their lifecycle - from creation to cancellation
+  </Card>
+  <Card title="Automated Billing" icon="credit-card">
+    Process recurring billing attempts with dunning management for failed payments
+  </Card>
+  <Card title="Customer Portal" icon="user">
+    Provide subscribers with a self-service portal to manage their subscriptions
+  </Card>
+</CardGroup>
+
+### Key Features
+
+- **Flexible Subscription Plans**: Create selling plans with customizable billing intervals (weekly, monthly, yearly) and delivery schedules
+- **Contract Operations**: Pause, resume, skip, and cancel subscriptions with full webhook integration
+- **Payment Management**: Update payment methods and billing addresses for active subscriptions
+- **Billing Automation**: Scheduled billing with configurable time zones and retry logic for failed payments
+- **Customer Experience**: Theme extensions and checkout UI for seamless subscription purchases
+- **Admin Interface**: Built with Polaris for a native Shopify admin experience
+- **Multi-Extension Support**: Includes customer account, admin action, POS, and theme extensions
+
+## Who It's For
+
+This reference app is designed for:
+
+<CardGroup cols={3}>
+  <Card title="App Developers" icon="code">
+    Building subscription apps for the Shopify App Store or custom merchant solutions
+  </Card>
+  <Card title="Technical Merchants" icon="store">
+    Creating custom subscription experiences tailored to specific business needs
+  </Card>
+  <Card title="Learning Developers" icon="graduation-cap">
+    Understanding Shopify's subscription APIs and best practices for subscription commerce
+  </Card>
+</CardGroup>
+
+### Use Cases
+
+- **Subscription Box Services**: Monthly curated product deliveries with flexible skip and pause options
+- **Replenishment Subscriptions**: Automatic reordering of consumable products (coffee, vitamins, pet food)
+- **Membership Programs**: Recurring access to exclusive products or discounts
+- **SaaS Product Subscriptions**: Digital product or service subscriptions managed through Shopify
+
+## Architecture
+
+The app is built using modern web technologies and Shopify's recommended patterns:
+
+- **Framework**: [Remix](https://remix.run/) for full-stack React development
+- **Database**: Prisma ORM with SQLite (production-ready for PostgreSQL/MySQL)
+- **UI**: [@shopify/polaris](https://polaris.shopify.com/) for admin interface components
+- **API Client**: [@shopify/shopify-app-remix](https://github.com/Shopify/shopify-app-js) for authentication and API access
+- **Extensions**: UI Extensions for customer accounts, admin actions, POS, and themes
+
+### Core Components
+
+```plaintext
+app/
+├── routes/           # Remix routes for app pages and API endpoints
+├── models/           # Data models and business logic
+├── components/       # Reusable UI components
+├── services/         # External service integrations
+└── jobs/             # Background job processing
+
+extensions/
+├── buyer-subscriptions/        # Customer account subscription management
+├── admin-subs-action/          # Admin subscription quick actions
+├── theme-extension/            # Storefront subscription widgets
+└── pos-extension/              # Point of sale subscription support
+```
+
+## App Store Considerations
+
+<Warning>
+If you plan to submit a subscription app to the Shopify App Store, your application must be **substantively different** from this reference app. Simply rebranding or making minor modifications is not sufficient. Your app should provide unique features or solve specific merchant problems that add value beyond the reference implementation.
+</Warning>
+
+The Shopify App Store requires apps to:
+
+- Offer unique functionality or serve a specific niche
+- Provide clear value differentiation from existing apps
+- Meet all [Shopify App Store requirements](https://shopify.dev/docs/apps/store/requirements)
+- Follow Shopify's design and UX guidelines
+
+## Technology Stack
+
+<CodeGroup>
+```json package.json
+{
+  "dependencies": {
+    "@remix-run/react": "2.16.8",
+    "@shopify/polaris": "13.9.5",
+    "@shopify/shopify-app-remix": "3.8.3",
+    "@shopify/ui-extensions-react": "2025.7.0",
+    "@prisma/client": "6.10.1"
+  }
+}
+```
+
+```toml shopify.app.toml
+name = "Subscriptions application"
+embedded = true
+
+[access_scopes]
+scopes = "write_own_subscription_contracts,read_all_orders,write_products"
+
+[webhooks]
+api_version = "unstable"
+```
+</CodeGroup>
+
+## API Integration
+
+The app integrates with several Shopify APIs:
+
+- **Subscription Contracts API**: Manage subscription contract lifecycle
+- **Selling Plans API**: Create and configure subscription selling plans
+- **Customer Payment Methods API**: Handle payment method updates
+- **Orders API**: Process subscription orders and billing attempts
+- **Webhooks**: Real-time notifications for subscription events
+
+<Info>
+The app uses Shopify's `unstable` API version for webhooks to access the latest subscription features. For production apps, evaluate which API version best fits your stability requirements.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get the app running in 10 minutes and create your first subscription
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed setup instructions and configuration options
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+- [Shopify Subscriptions Documentation](https://shopify.dev/docs/apps/build/purchase-options/subscriptions)
+- [Selling Plans API Reference](https://shopify.dev/docs/api/admin-graphql/latest/queries/sellingPlanGroups)
+- [Subscription Contracts API](https://shopify.dev/docs/api/admin-graphql/latest/queries/subscriptionContracts)
+- [Remix Documentation](https://remix.run/docs)
+- [Polaris Design System](https://polaris.shopify.com/)

@@ -1,0 +1,285 @@
+---
+title: 'BillingSchedule Model'
+description: 'API reference for managing subscription billing schedules and batch processing'
+---
+
+# BillingSchedule Model
+
+The BillingSchedule model manages billing schedules for subscription contracts, including timezone configuration and batch processing of active schedules.
+
+## Database Schema
+
+```prisma
+model BillingSchedule {
+  id        Int      @id @default(autoincrement())
+  shop      String   @unique
+  hour      Int      @default(10)
+  timezone  String   @default("America/Toronto")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+```
+
+## Functions
+
+### findActiveBillingSchedulesInBatches
+
+Processes active billing schedules in batches using pagination.
+
+```typescript
+export async function findActiveBillingSchedulesInBatches(
+  callback: PaginatorCallbackFn,
+): Promise<void>
+```
+
+<ParamField path="callback" type="PaginatorCallbackFn" required>
+  Async callback function that processes each batch of billing schedules
+  
+  ```typescript
+  type PaginatorCallbackFn = (
+    records: BillingSchedule[]
+  ) => Promise<void>
+  ```
+</ParamField>
+
+**Example:**
+
+```typescript
+import { findActiveBillingSchedulesInBatches } from '~/models/BillingSchedule/BillingSchedule.server';
+
+await findActiveBillingSchedulesInBatches(async (batch) => {
+  for (const schedule of batch) {
+    console.log(`Processing shop: ${schedule.shop}`);
+    console.log(`Timezone: ${schedule.timezone}`);
+    console.log(`Hour: ${schedule.hour}`);
+    
+    // Process billing for this shop
+    await processBillingForShop(schedule);
+  }
+});
+```
+
+**Use Cases:**
+
+- Processing daily billing cycles across all active shops
+- Generating billing reports for active subscriptions
+- Sending billing reminders based on timezone
+
+---
+
+### createActiveBillingSchedule
+
+Creates or updates a billing schedule for a shop, automatically fetching the shop's timezone.
+
+```typescript
+export async function createActiveBillingSchedule(
+  shop: string,
+): Promise<BillingSchedule>
+```
+
+<ParamField path="shop" type="string" required>
+  Shop domain (e.g., "mystore.myshopify.com")
+</ParamField>
+
+<ResponseField name="return" type="BillingSchedule">
+  The created or updated billing schedule
+  
+  <Expandable title="BillingSchedule properties">
+    <ResponseField name="id" type="number">
+      Auto-incremented primary key
+    </ResponseField>
+    <ResponseField name="shop" type="string">
+      Shop domain (unique)
+    </ResponseField>
+    <ResponseField name="hour" type="number">
+      Hour of the day to process billing (0-23), defaults to 10
+    </ResponseField>
+    <ResponseField name="timezone" type="string">
+      IANA timezone identifier (e.g., "America/Toronto")
+    </ResponseField>
+    <ResponseField name="active" type="boolean">
+      Whether the billing schedule is active
+    </ResponseField>
+    <ResponseField name="createdAt" type="Date">
+      Timestamp when the schedule was created
+    </ResponseField>
+    <ResponseField name="updatedAt" type="Date">
+      Timestamp when the schedule was last updated
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { createActiveBillingSchedule } from '~/models/BillingSchedule/BillingSchedule.server';
+
+// During app installation or settings update
+export async function action({ request }: ActionFunctionArgs) {
+  const { session } = await authenticate.admin(request);
+  
+  const billingSchedule = await createActiveBillingSchedule(
+    session.shop
+  );
+  
+  return json({
+    success: true,
+    schedule: billingSchedule,
+  });
+}
+```
+
+**Behavior:**
+
+- If a billing schedule already exists for the shop, it will be updated
+- The shop's timezone is automatically queried from Shopify
+- The schedule is set to `active: true` by default
+- Uses Prisma's `upsert` operation for idempotency
+
+---
+
+### paginate
+
+Low-level pagination utility for querying billing schedules in batches.
+
+```typescript
+export async function paginate(
+  args: Prisma.BillingScheduleFindManyArgs,
+  callback: PaginatorCallbackFn,
+  cursor?: number,
+): Promise<void>
+```
+
+<ParamField path="args" type="Prisma.BillingScheduleFindManyArgs" required>
+  Prisma query arguments for filtering and ordering
+  
+  <Expandable title="common properties">
+    <ParamField path="where" type="object">
+      Filter conditions (e.g., `{ active: true }`)
+    </ParamField>
+    <ParamField path="orderBy" type="object">
+      Ordering configuration (defaults to `{ id: 'asc' }`)
+    </ParamField>
+    <ParamField path="take" type="number">
+      Number of records per batch (defaults to 1000)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="callback" type="PaginatorCallbackFn" required>
+  Function to process each batch
+</ParamField>
+
+<ParamField path="cursor" type="number">
+  Internal cursor for pagination (used recursively)
+</ParamField>
+
+**Example:**
+
+```typescript
+import { paginate } from '~/models/BillingSchedule/paginate';
+
+// Find all schedules in a specific timezone
+await paginate(
+  {
+    where: {
+      active: true,
+      timezone: 'America/New_York',
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  },
+  async (batch) => {
+    console.log(`Processing ${batch.length} schedules`);
+    await processSchedules(batch);
+  }
+);
+```
+
+**Implementation Details:**
+
+- Uses cursor-based pagination for memory efficiency
+- Automatically handles recursive pagination until no more records
+- Default batch size is 1000 records
+- Orders by `id` ascending by default
+
+## Type Definitions
+
+### BillingSchedule
+
+```typescript
+interface BillingSchedule {
+  id: number;
+  shop: string;
+  hour: number;
+  timezone: string;
+  active: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+### PaginatorCallbackFn
+
+```typescript
+type PaginatorCallbackFn = (
+  records: BillingSchedule[]
+) => Promise<void>;
+```
+
+## Usage Patterns
+
+### Processing Daily Billing
+
+```typescript
+import { findActiveBillingSchedulesInBatches } from '~/models/BillingSchedule/BillingSchedule.server';
+import { DateTime } from 'luxon';
+
+export async function processDailyBilling() {
+  await findActiveBillingSchedulesInBatches(async (schedules) => {
+    for (const schedule of schedules) {
+      const now = DateTime.now().setZone(schedule.timezone);
+      
+      if (now.hour === schedule.hour) {
+        // Process billing for this shop
+        await runBillingCycles(schedule.shop);
+      }
+    }
+  });
+}
+```
+
+### Timezone-Aware Scheduling
+
+```typescript
+import { createActiveBillingSchedule } from '~/models/BillingSchedule/BillingSchedule.server';
+
+// Update billing hour for a shop
+export async function updateBillingHour(shop: string, hour: number) {
+  const schedule = await createActiveBillingSchedule(shop);
+  
+  await prisma.billingSchedule.update({
+    where: { shop },
+    data: { hour },
+  });
+}
+```
+
+### Deactivating Billing
+
+```typescript
+import prisma from '~/db.server';
+
+export async function deactivateBilling(shop: string) {
+  await prisma.billingSchedule.update({
+    where: { shop },
+    data: { active: false },
+  });
+}
+```
+
+## Related
+
+- [SubscriptionContract Model](/api/models/subscription-contract)
+- [DunningTracker Model](/api/models/dunning-tracker)

@@ -1,0 +1,732 @@
+---
+title: Installation
+description: Detailed installation and setup instructions for the Shopify Subscriptions Reference App
+---
+
+## Installation Methods
+
+You can install the Subscriptions Reference App using two methods:
+
+1. **Shopify CLI (Recommended)**: Fastest way to get started with automatic configuration
+2. **Manual Clone**: More control over the setup process
+
+<Tabs>
+  <Tab title="Shopify CLI">
+    
+### Using Shopify CLI
+
+The Shopify CLI is the recommended installation method as it handles app creation, configuration, and dependency installation automatically.
+
+<Steps>
+
+#### Install Shopify CLI
+
+Install the Shopify CLI globally if you haven't already:
+
+<CodeGroup>
+```bash npm
+npm install -g @shopify/cli @shopify/app
+```
+
+```bash yarn
+yarn global add @shopify/cli @shopify/app
+```
+
+```bash pnpm
+pnpm add -g @shopify/cli @shopify/app
+```
+</CodeGroup>
+
+Verify installation:
+
+```bash
+shopify version
+# Should output: 3.81.2 or higher
+```
+
+#### Initialize the App
+
+Create a new app from the subscriptions template:
+
+```bash
+shopify app init --template https://github.com/Shopify/subscriptions-reference-app
+```
+
+Follow the prompts:
+
+```plaintext
+? App name:
+> my-subscriptions-app
+
+? Which package manager do you want to use?
+> npm / yarn / pnpm
+```
+
+#### Install Dependencies
+
+The CLI automatically installs dependencies, but if needed, you can run:
+
+<CodeGroup>
+```bash npm
+npm install
+```
+
+```bash yarn
+yarn install
+```
+
+```bash pnpm
+pnpm install
+```
+</CodeGroup>
+
+</Steps>
+
+  </Tab>
+  <Tab title="Manual Clone">
+
+### Manual Installation
+
+For more control over the setup, you can clone the repository directly.
+
+<Steps>
+
+#### Clone the Repository
+
+```bash
+git clone https://github.com/Shopify/subscriptions-reference-app.git
+cd subscriptions-reference-app
+```
+
+#### Install Dependencies
+
+Choose your preferred package manager:
+
+<CodeGroup>
+```bash npm
+npm install
+```
+
+```bash yarn
+yarn install
+```
+
+```bash pnpm
+pnpm install
+```
+</CodeGroup>
+
+<Note>
+The app uses pnpm workspaces for managing extensions. While you can use npm or yarn, pnpm is recommended for full feature compatibility.
+</Note>
+
+#### Create Shopify App
+
+Create a new app in your Shopify Partner dashboard or use the CLI:
+
+```bash
+shopify app create
+```
+
+This will:
+- Create an app in your Partner account
+- Generate a `shopify.app.toml` configuration file
+- Set up OAuth credentials
+
+</Steps>
+
+  </Tab>
+</Tabs>
+
+## Database Setup
+
+The app uses Prisma with SQLite for local development. For production, you'll want to use PostgreSQL or MySQL.
+
+<Steps>
+
+### Generate Prisma Client
+
+Generate the Prisma client and create the database:
+
+<CodeGroup>
+```bash npm
+npm run setup
+```
+
+```bash yarn
+yarn setup
+```
+
+```bash pnpm
+pnpm setup
+```
+</CodeGroup>
+
+This command runs:
+
+```bash
+prisma generate && prisma migrate deploy
+```
+
+### Review Database Schema
+
+The app uses three main models defined in `prisma/schema.prisma`:
+
+```prisma prisma/schema.prisma
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  accessToken   String
+  userId        BigInt?
+  // ... additional fields
+}
+
+model BillingSchedule {
+  id        Int      @id @default(autoincrement())
+  shop      String   @unique
+  hour      Int      @default(10)
+  timezone  String   @default("America/Toronto")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model DunningTracker {
+  id                Int       @id @default(autoincrement())
+  shop              String
+  contractId        String
+  billingCycleIndex Int
+  failureReason     String
+  completedAt       DateTime?
+  completedReason   String?
+  
+  @@unique([shop, contractId, billingCycleIndex, failureReason])
+}
+```
+
+<Info>
+The **Session** model stores OAuth session data, **BillingSchedule** manages when billing runs for each shop, and **DunningTracker** handles failed payment retry logic.
+</Info>
+
+### Production Database
+
+For production, update `prisma/schema.prisma` to use PostgreSQL:
+
+```prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+```
+
+Then run migrations:
+
+```bash
+prisma migrate deploy
+```
+
+</Steps>
+
+## Configuration
+
+### App Configuration
+
+The `shopify.app.toml` file contains your app's configuration:
+
+```toml shopify.app.toml
+name = "Subscriptions application"
+client_id = "subscriptions-app-key"
+application_url = "https://example.com"
+embedded = true
+
+[access_scopes]
+scopes = "customer_read_customers,customer_read_orders,customer_read_own_subscription_contracts,customer_write_customers,customer_write_own_subscription_contracts,read_all_orders,read_locales,read_locations,read_themes,write_customer_payment_methods,write_customers,write_metaobject_definitions,write_metaobjects,write_orders,write_own_subscription_contracts,write_products,write_translations,read_analytics"
+
+[build]
+automatically_update_urls_on_dev = true
+```
+
+<Warning>
+The app requires extensive permissions to manage subscriptions. All listed scopes are necessary for core functionality:
+
+- `write_own_subscription_contracts`: Create and manage subscription contracts
+- `write_customer_payment_methods`: Update customer payment information
+- `write_orders`: Process billing attempts and create orders
+- `read_all_orders`: View subscription order history
+</Warning>
+
+### Environment Variables
+
+Create environment files for different environments:
+
+<CodeGroup>
+```bash .env.development
+# Shopify App Configuration (auto-generated by CLI)
+SHOPIFY_API_KEY=your_api_key
+SHOPIFY_API_SECRET=your_api_secret
+SCOPES=write_products,write_customers,write_draft_orders
+
+# Database
+DATABASE_URL=file:./data.db
+
+# Session Storage
+SHOPIFY_APP_URL=https://your-app-url.ngrok.io
+
+# Development Settings
+NODE_ENV=development
+```
+
+```bash .env.production
+# Shopify App Configuration
+SHOPIFY_API_KEY=your_production_api_key
+SHOPIFY_API_SECRET=your_production_api_secret
+
+# Database (PostgreSQL)
+DATABASE_URL=postgresql://user:password@host:5432/subscriptions_db
+
+# App URL
+SHOPIFY_APP_URL=https://your-app.com
+
+# Session Storage
+SESSION_SECRET=your_secure_random_secret
+
+# Production Settings
+NODE_ENV=production
+```
+</CodeGroup>
+
+<Note>
+Environment variables starting with `SHOPIFY_` are automatically set by the CLI during development. You typically don't need to set these manually.
+</Note>
+
+### Webhook Configuration
+
+Webhooks are defined in `shopify.app.toml` and automatically registered:
+
+```toml
+[webhooks]
+api_version = "unstable"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_contracts/create" ]
+  uri = "/webhooks/subscription_contracts/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_contracts/activate" ]
+  uri = "/webhooks/subscription_contracts/activate"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_billing_attempts/success" ]
+  uri = "/webhooks/subscription_billing_attempts/success"
+
+  [[webhooks.subscriptions]]
+  topics = [ "subscription_billing_attempts/failure" ]
+  uri = "/webhooks/subscription_billing_attempts/failure"
+```
+
+The app handles these webhook topics:
+
+- `subscription_contracts/create` - New subscription created
+- `subscription_contracts/activate` - Subscription activated
+- `subscription_contracts/cancel` - Subscription cancelled
+- `subscription_contracts/pause` - Subscription paused
+- `subscription_billing_attempts/success` - Successful billing
+- `subscription_billing_attempts/failure` - Failed billing attempt
+- `subscription_billing_cycles/skip` - Billing cycle skipped
+- `selling_plan_groups/create` - Selling plan created
+- `selling_plan_groups/update` - Selling plan updated
+
+## Extensions
+
+The app includes multiple UI extensions that enhance the subscription experience:
+
+### Buyer Subscriptions Extension
+
+Customer account extension for managing subscriptions:
+
+```bash
+cd extensions/buyer-subscriptions
+```
+
+Built with React and Shopify UI Extensions:
+
+```typescript extensions/buyer-subscriptions/src/Subscriptions.tsx
+import {
+  useApi,
+  useCustomer,
+  Card,
+  Button
+} from '@shopify/ui-extensions-react/customer-account';
+
+export default function Subscriptions() {
+  const { query } = useApi();
+  const customer = useCustomer();
+  
+  // Fetch customer's subscriptions
+  const contracts = await query(GET_CONTRACTS_QUERY);
+  
+  return (
+    <Card>
+      <SubscriptionList contracts={contracts} />
+    </Card>
+  );
+}
+```
+
+### Admin Action Extension
+
+Quick actions in the admin subscription contract page:
+
+```bash
+cd extensions/admin-subs-action
+```
+
+### Theme Extension
+
+Storefront widgets for subscription purchase options:
+
+```bash
+cd extensions/theme-extension
+```
+
+### POS Extension
+
+Point of sale support for subscription products:
+
+```bash
+cd extensions/pos-extension
+```
+
+<Info>
+All extensions are automatically deployed when you run `shopify app dev` or `shopify app deploy`.
+</Info>
+
+## Development Server
+
+### Start Development
+
+Start the app with hot reloading:
+
+<CodeGroup>
+```bash npm
+npm run dev
+```
+
+```bash yarn
+yarn dev
+```
+
+```bash pnpm
+pnpm dev
+```
+</CodeGroup>
+
+The development server:
+
+1. Starts the Remix dev server on port 3000 (or next available)
+2. Opens a tunnel using Cloudflare Tunnel or ngrok
+3. Updates your app URLs in the Partner Dashboard
+4. Registers webhooks
+5. Provides an installation URL
+
+```plaintext
+┌─ info ───────────────────────────────────────────────────────────┐
+│                                                                   │
+│  Preview your app:                                                │
+│  https://admin.shopify.com/store/dev-store/apps/app-id           │
+│                                                                   │
+│  Local:     http://localhost:3000                                 │
+│  Network:   https://your-app.cloudflare.io                        │
+│                                                                   │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+### Development Workflow
+
+The app uses Remix's built-in hot reloading:
+
+- **Server changes**: Automatically restart the server
+- **Client changes**: Hot module replacement (HMR)
+- **Route changes**: Instant updates
+
+<Note>
+Extensions are rebuilt automatically when you make changes. Refresh the admin or storefront to see updates.
+</Note>
+
+## Build & Deploy
+
+### Build for Production
+
+Create a production build:
+
+<CodeGroup>
+```bash npm
+npm run build
+```
+
+```bash yarn
+yarn build
+```
+
+```bash pnpm
+pnpm build
+```
+</CodeGroup>
+
+This creates optimized bundles in the `build/` directory.
+
+### Deploy Extensions
+
+Deploy all extensions to Shopify:
+
+```bash
+shopify app deploy
+```
+
+This command:
+
+1. Builds all extensions
+2. Uploads them to Shopify
+3. Creates a new app version
+4. Provides a release URL
+
+<Warning>
+Deploying creates a new app version that must be released through the Partner Dashboard before merchants can use it.
+</Warning>
+
+### Hosting Options
+
+You can host the app on any Node.js platform:
+
+<Tabs>
+  <Tab title="Shopify Hosting">
+  
+Use Shopify's built-in hosting (coming soon):
+
+```bash
+shopify app deploy --hosting shopify
+```
+
+  </Tab>
+  <Tab title="Custom Hosting">
+
+Deploy to your own infrastructure:
+
+**Heroku**:
+```bash
+git push heroku main
+```
+
+**Docker**:
+```dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --production
+COPY . .
+RUN npm run build
+CMD ["npm", "start"]
+```
+
+**Fly.io**:
+```bash
+fly deploy
+```
+
+  </Tab>
+</Tabs>
+
+### Environment Setup
+
+For production deployment:
+
+<Steps>
+
+#### Set Environment Variables
+
+Configure production environment variables on your hosting platform:
+
+```bash
+SHOPIFY_API_KEY=your_production_key
+SHOPIFY_API_SECRET=your_production_secret
+SHOPIFY_APP_URL=https://your-app.com
+DATABASE_URL=postgresql://...
+NODE_ENV=production
+```
+
+#### Run Database Migrations
+
+```bash
+prisma migrate deploy
+```
+
+#### Start the Production Server
+
+```bash
+npm start
+```
+
+This runs the Remix production server:
+
+```json package.json
+{
+  "scripts": {
+    "start": "remix-serve ./build/server/index.js"
+  }
+}
+```
+
+</Steps>
+
+## Testing
+
+The app includes comprehensive test coverage:
+
+### Run All Tests
+
+<CodeGroup>
+```bash npm
+npm test
+```
+
+```bash yarn
+yarn test
+```
+
+```bash pnpm
+pnpm test
+```
+</CodeGroup>
+
+### Run Specific Extension Tests
+
+```bash
+npm run test:ci:buyer-subscriptions
+npm run test:ci:admin-subs-action
+npm run test:ci:thank-you-page
+```
+
+### Type Checking
+
+Run TypeScript type checking:
+
+```bash
+npm run type-check
+```
+
+This checks:
+- Main app types
+- Extension types (buyer-subscriptions, admin-subs-action)
+
+### Code Quality
+
+Lint the codebase:
+
+```bash
+npm run lint
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Installation fails with permission errors">
+    If you encounter EACCES errors during installation:
+    
+    ```bash
+    # Fix npm permissions
+    mkdir ~/.npm-global
+    npm config set prefix '~/.npm-global'
+    export PATH=~/.npm-global/bin:$PATH
+    ```
+    
+    Or use a Node version manager like [nvm](https://github.com/nvm-sh/nvm).
+  </Accordion>
+  
+  <Accordion title="Prisma client generation fails">
+    If `prisma generate` fails:
+    
+    1. Delete `node_modules` and reinstall:
+       ```bash
+       rm -rf node_modules
+       npm install
+       ```
+    
+    2. Manually generate the client:
+       ```bash
+       npx prisma generate
+       ```
+    
+    3. Check your `schema.prisma` for syntax errors
+  </Accordion>
+  
+  <Accordion title="Extensions not deploying">
+    If extensions fail to deploy:
+    
+    1. Check extension configuration in `shopify.app.toml`
+    2. Ensure all extension dependencies are installed:
+       ```bash
+       cd extensions/buyer-subscriptions
+       npm install
+       ```
+    3. Build extensions manually:
+       ```bash
+       shopify app build
+       ```
+  </Accordion>
+  
+  <Accordion title="Database connection errors">
+    For database connection issues:
+    
+    - **SQLite**: Ensure the file path in `DATABASE_URL` is writable
+    - **PostgreSQL**: Verify connection string and network access
+    - **Migrations**: Run `prisma migrate deploy` after schema changes
+  </Accordion>
+  
+  <Accordion title="Webhook delivery failures">
+    If webhooks aren't being received:
+    
+    1. Check webhook registration:
+       ```bash
+       shopify app webhook list
+       ```
+    
+    2. Verify your app URL is publicly accessible
+    
+    3. Check webhook logs in the Partner Dashboard
+    
+    4. Ensure webhook handlers return 200 OK:
+       ```typescript
+       export async function action({ request }) {
+         // Process webhook
+         return json({ success: true }, { status: 200 });
+       }
+       ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Create your first subscription selling plan in 10 minutes
+  </Card>
+  <Card title="API Reference" icon="code">
+    Explore the GraphQL API for subscriptions and selling plans
+  </Card>
+  <Card title="Customize Extensions" icon="paintbrush">
+    Learn how to modify the customer and admin UI extensions
+  </Card>
+  <Card title="Billing Automation" icon="clock">
+    Configure billing schedules and dunning management
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+- [Shopify CLI Documentation](https://shopify.dev/docs/api/shopify-cli)
+- [Remix Documentation](https://remix.run/docs)
+- [Prisma Documentation](https://www.prisma.io/docs)
+- [Shopify App Bridge](https://shopify.dev/docs/api/app-bridge)
+- [Polaris Components](https://polaris.shopify.com/components)

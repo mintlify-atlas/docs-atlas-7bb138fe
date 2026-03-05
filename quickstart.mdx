@@ -1,80 +1,222 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "10-Minute Quickstart"
+description: "Get the Shopify Subscriptions Reference App running and create your first subscription in 10 minutes"
 ---
 
-## Get started in three steps
+## Get Started in Minutes
 
-Get your documentation site running locally and make your first customization.
+This quickstart guide will walk you through cloning, running, and creating your first subscription plan with the Shopify Subscriptions Reference App.
 
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+<Steps>
+  <Step title="Clone and Install">
+    Use the Shopify CLI to create a new app from the template:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    <CodeGroup>
+    ```bash Shopify CLI
+    shopify app init --template https://github.com/Shopify/subscriptions-reference-app
+    cd subscriptions-reference-app
+    ```
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    ```bash Manual Clone
+    git clone https://github.com/Shopify/subscriptions-reference-app.git
+    cd subscriptions-reference-app
+    ```
+    </CodeGroup>
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    Install dependencies:
+    
+    <CodeGroup>
+    ```bash pnpm
+    pnpm install
+    ```
+    
+    ```bash npm
+    npm install
+    ```
+    
+    ```bash yarn
+    yarn install
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Set Up Database">
+    Initialize the SQLite database with Prisma:
+    
+    ```bash
+    pnpm setup
+    ```
+    
+    This command runs:
+    - `prisma generate` - Generates Prisma Client
+    - `prisma migrate deploy` - Applies database migrations
+    
+    <Info>
+      The app uses SQLite by default for development. For production, configure PostgreSQL or MySQL in your environment variables.
+    </Info>
+  </Step>
+  
+  <Step title="Start the Development Server">
+    Run the app with the Shopify CLI:
+    
+    ```bash
+    pnpm dev
+    ```
+    
+    This will:
+    1. Start the Remix development server
+    2. Open a tunnel for local development
+    3. Prompt you to select a Partner organization and development store
+    4. Install the app on your development store
+    
+    <Note>
+      You'll need a [Shopify Partner account](https://partners.shopify.com) and a development store to test the app.
+    </Note>
+  </Step>
+  
+  <Step title="Access the App">
+    After installation, the CLI will provide a URL to access your app in the Shopify admin:
+    
+    ```
+    https://admin.shopify.com/store/YOUR-STORE/apps/subscriptions-app
+    ```
+    
+    Click through to open the app embedded in your Shopify admin.
+  </Step>
+  
+  <Step title="Create Your First Selling Plan">
+    Now let's create a subscription plan for your products:
+    
+    1. **Navigate to Plans**: In the app, click "Create Plan" or go to the Plans section
+    
+    2. **Configure Basic Details**:
+       ```
+       Plan Name: Monthly Coffee Subscription
+       Merchant Code: monthly-coffee
+       ```
+    
+    3. **Set Delivery Options**:
+       - Delivery Frequency: Every 1 Month
+       - Discount: 10% off
+    
+    4. **Select Products**: Choose which products customers can subscribe to
+    
+    5. **Save the Plan**: Click "Save" to create your selling plan group
+    
+    <Tip>
+      You can create multiple delivery options (weekly, monthly, quarterly) in a single selling plan group.
+    </Tip>
+  </Step>
+  
+  <Step title="Test a Subscription Purchase">
+    Now test the customer experience:
+    
+    1. **Visit Your Store**: Go to your development store's online storefront
+    
+    2. **Add a Subscription Product**: Find a product you added to the selling plan
+    
+    3. **Select Subscription**: On the product page, you'll see subscription options via the admin extension
+    
+    4. **Complete Checkout**: Use a test payment method:
+       ```
+       Card: 4242 4242 4242 4242
+       Expiry: Any future date
+       CVC: Any 3 digits
+       ```
+    
+    5. **View the Contract**: After purchase, return to the app to see the new subscription contract
+  </Step>
+  
+  <Step title="Manage the Subscription">
+    Explore subscription management features:
+    
+    - **View Contract Details**: Click on the contract to see customer info, billing schedule, and line items
+    - **Pause Subscription**: Test pausing the subscription
+    - **Skip Billing Cycle**: Skip an upcoming billing attempt
+    - **Update Delivery Address**: Change the shipping address
+    - **Cancel Subscription**: Cancel the subscription
+    
+    All these actions are available in the contract details page.
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## What You've Built
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+In just 10 minutes, you've:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Set Up Infrastructure" icon="database">
+    Database, authentication, and Shopify app configuration
+  </Card>
+  <Card title="Created a Selling Plan" icon="calendar">
+    A subscription plan with delivery frequency and discounts
+  </Card>
+  <Card title="Tested Purchase Flow" icon="shopping-cart">
+    Complete customer subscription purchase experience
+  </Card>
+  <Card title="Managed Contracts" icon="file-contract">
+    Subscription lifecycle management tools
+  </Card>
 </CardGroup>
 
+## Next Steps
+
+Now that you have a working subscription app, explore these features:
+
+<CardGroup cols={2}>
+  <Card title="Understand Core Concepts" icon="book" href="/concepts/overview">
+    Learn how selling plans, contracts, and billing cycles work
+  </Card>
+  <Card title="Configure Billing Schedule" icon="clock" href="/features/billing-schedule">
+    Set up automated billing cycle processing
+  </Card>
+  <Card title="Set Up Dunning" icon="arrows-rotate" href="/concepts/dunning">
+    Handle failed payments with retry logic
+  </Card>
+  <Card title="Customize Customer Portal" icon="users" href="/guides/customizing-customer-portal">
+    Tailor the buyer-facing subscription management UI
+  </Card>
+  <Card title="Set Up Webhooks" icon="webhook" href="/guides/setting-up-webhooks">
+    React to subscription events in real-time
+  </Card>
+  <Card title="Deploy to Production" icon="rocket" href="/deployment/production">
+    Launch your subscription app
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="App won't start - port already in use">
+    If you see `EADDRINUSE` error, another process is using port 3000. Either:
+    - Kill the existing process: `lsof -ti:3000 | xargs kill -9`
+    - Or change the port in `vite.config.ts`
+  </Accordion>
+  
+  <Accordion title="Database errors during setup">
+    If Prisma migrations fail:
+    ```bash
+    rm -rf prisma/data.db
+    pnpm setup
+    ```
+    This recreates the database from scratch.
+  </Accordion>
+  
+  <Accordion title="Can't see subscription options on product page">
+    Make sure:
+    1. Your selling plan group includes the product or variant
+    2. The admin extension is properly deployed (check Extensions in Shopify CLI output)
+    3. Clear your browser cache and refresh the page
+  </Accordion>
+  
+  <Accordion title="GraphQL errors when creating selling plans">
+    Verify your app has the required scopes in `shopify.app.toml`:
+    - `write_products`
+    - `write_own_subscription_contracts`
+    - `write_customer_payment_methods`
+  </Accordion>
+</AccordionGroup>
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  Need more help? Check the [installation guide](/installation) for detailed setup instructions or review the [core concepts](/concepts/overview) to understand how subscriptions work.
 </Note>

@@ -1,0 +1,145 @@
+---
+title: Subscription Concepts Overview
+description: Learn the core concepts of Shopify subscriptions and how they work in this reference app
+---
+
+## Introduction
+
+Shopify subscriptions enable merchants to sell products on a recurring basis. This reference app demonstrates how to build a subscription management system using Shopify's Subscription APIs.
+
+## Core Components
+
+The subscription system is built on three main concepts:
+
+<CardGroup cols={3}>
+  <Card title="Selling Plans" icon="calendar" href="/concepts/selling-plans">
+    Define the terms of subscription offerings, including pricing and delivery schedules
+  </Card>
+  <Card title="Subscription Contracts" icon="file-contract" href="/concepts/subscription-contracts">
+    Represent the agreement between merchant and customer for recurring purchases
+  </Card>
+  <Card title="Billing Cycles" icon="clock" href="/concepts/billing-cycles">
+    Track individual recurring billing periods and payment attempts
+  </Card>
+</CardGroup>
+
+## How Subscriptions Work
+
+The subscription lifecycle follows this flow:
+
+1. **Selling Plan Creation**: Merchants create selling plan groups that define subscription terms (delivery frequency, pricing, discounts)
+2. **Customer Subscription**: Customers purchase products with a selling plan, creating a subscription contract
+3. **Billing Cycles**: Shopify automatically processes billing attempts at each billing interval
+4. **Dunning Management**: If billing fails, the app handles retry logic and customer communications
+
+<Note>
+  This reference app demonstrates best practices for subscription management, including automated dunning, inventory handling, and customer notifications.
+</Note>
+
+## Subscription Status Types
+
+Subscription contracts can have the following statuses:
+
+```typescript
+export const SubscriptionContractStatus = {
+  Active: 'ACTIVE',
+  Paused: 'PAUSED',
+  Cancelled: 'CANCELLED',
+  Expired: 'EXPIRED',
+  Failed: 'FAILED',
+  Stale: 'STALE',
+} as const;
+```
+
+<Accordion title="Status Definitions">
+  - **ACTIVE**: Subscription is currently active and will process billing attempts
+  - **PAUSED**: Subscription is temporarily paused and won't generate billing attempts
+  - **CANCELLED**: Subscription has been permanently cancelled
+  - **EXPIRED**: Subscription reached its maximum cycle limit
+  - **FAILED**: Subscription failed due to payment issues after all retry attempts
+  - **STALE**: Subscription data may be out of sync
+</Accordion>
+
+## Intervals and Frequencies
+
+Subscriptions support four interval types:
+
+```typescript
+export enum SellingPlanInterval {
+  Day = 'DAY',
+  Week = 'WEEK',
+  Month = 'MONTH',
+  Year = 'YEAR',
+}
+```
+
+Each interval can have an `intervalCount` to define the frequency:
+- `interval: 'WEEK'` + `intervalCount: 2` = Every 2 weeks
+- `interval: 'MONTH'` + `intervalCount: 1` = Monthly
+- `interval: 'DAY'` + `intervalCount: 30` = Every 30 days
+
+## Key Data Structures
+
+### Recurring Policy
+
+Both billing and delivery policies share the same structure:
+
+```typescript
+interface RecurringPolicy {
+  interval: SellingPlanInterval;
+  intervalCount: number;
+}
+```
+
+### Money Object
+
+All prices are represented consistently:
+
+```typescript
+interface Money {
+  amount: number;
+  currencyCode: string;
+}
+```
+
+<Warning>
+  Money amounts are stored as decimal numbers, not integers. Ensure proper decimal handling in calculations.
+</Warning>
+
+## Settings Configuration
+
+The app maintains global settings for subscription management:
+
+```typescript
+interface Settings {
+  id: string;
+  retryAttempts: number;
+  daysBetweenRetryAttempts: number;
+  onFailure: OnFailureTypeType; // 'cancel' | 'pause' | 'skip'
+  inventoryRetryAttempts: number;
+  inventoryDaysBetweenRetryAttempts: number;
+  inventoryOnFailure: OnInventoryFailureTypeType;
+  inventoryNotificationFrequency: InventoryNotificationFrequencyTypeType;
+}
+```
+
+<Info>
+  These settings control dunning behavior, inventory failure handling, and merchant notifications.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Create Selling Plans" icon="plus" href="/guides/creating-selling-plans">
+    Learn how to create and configure selling plan groups
+  </Card>
+  <Card title="Manage Contracts" icon="pen-to-square" href="/guides/managing-contracts">
+    Handle subscription contract lifecycle operations
+  </Card>
+  <Card title="Configure Dunning" icon="arrows-rotate" href="/concepts/dunning">
+    Set up payment retry logic and failure handling
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/models/selling-plan">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>

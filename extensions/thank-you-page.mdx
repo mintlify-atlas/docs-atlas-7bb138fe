@@ -1,0 +1,460 @@
+---
+title: Thank You Page Extension
+description: Post-purchase extension that displays subscription management link on the order status page
+---
+
+The Thank You Page extension displays a subscription management link on the post-purchase order status page when an order contains subscription items.
+
+## Extension Configuration
+
+Configured in `shopify.extension.toml`:
+
+```toml
+api_version = "2025-10"
+
+[[extensions]]
+name = "Manage subscription link"
+handle = "thank-you-page"
+type = "ui_extension"
+
+[[extensions.targeting]]
+module = "./src/ThankYouPageManageSubscriptions.tsx"
+target = "purchase.thank-you.block.render"
+
+[extensions.capabilities]
+api_access = true
+```
+
+### Extension Target
+
+- **Target**: `purchase.thank-you.block.render`
+- **Surface**: Order status / thank you page
+- **Visibility**: Only shown when order contains subscription items
+
+## Implementation
+
+The extension uses Shopify's `@shopify/ui-extensions/preact` library:
+
+```tsx
+import '@shopify/ui-extensions/preact';
+import {render} from 'preact';
+
+export function ThankYouPageManageSubscriptions() {
+  const shop = shopify.shop;
+  const isEditor = shopify.extension.editor;
+  const defaultAccountURL = `${shop?.storefrontUrl || ''}/account`;
+  
+  const hasSubscription =
+    shopify.lines?.value?.some(
+      (line) => line.merchandise?.sellingPlan?.recurringDeliveries,
+    ) ?? false;
+  
+  // Hide if no subscription items (except in editor)
+  if (!hasSubscription && !isEditor) {
+    return null;
+  }
+  
+  const translate = shopify.i18n.translate;
+  
+  return (
+    <s-stack direction="block" gap="base">
+      {isEditor ? (
+        <s-banner tone="info">
+          This extension is only visible for orders with subscriptions.
+        </s-banner>
+      ) : null}
+      <s-box padding="base" border="base" borderRadius="base">
+        <s-stack direction="block" gap="base">
+          <s-heading>{translate('title')}</s-heading>
+          <s-text>{translate('content')}</s-text>
+          <s-button variant="secondary" href={defaultAccountURL}>
+            {translate('manageSubscriptionLink')}
+          </s-button>
+        </s-stack>
+      </s-box>
+    </s-stack>
+  );
+}
+
+export default async () => {
+  render(<ThankYouPageManageSubscriptions />, document.body);
+};
+```
+
+## Key Features
+
+### Conditional Rendering
+
+The extension only displays when the order contains subscription items:
+
+```tsx
+const hasSubscription =
+  shopify.lines?.value?.some(
+    (line) => line.merchandise?.sellingPlan?.recurringDeliveries,
+  ) ?? false;
+
+if (!hasSubscription && !isEditor) {
+  return null;
+}
+```
+
+### Editor Preview
+
+When viewed in the theme editor, shows an informational banner:
+
+```tsx
+{isEditor ? (
+  <s-banner tone="info">
+    This extension is only visible for orders with subscriptions.
+  </s-banner>
+) : null}
+```
+
+### Account Link
+
+Directs customers to their account page:
+
+```tsx
+const defaultAccountURL = `${shop?.storefrontUrl || ''}/account`;
+
+<s-button variant="secondary" href={defaultAccountURL}>
+  {translate('manageSubscriptionLink')}
+</s-button>
+```
+
+## UI Components
+
+The extension uses Shopify's standard UI components:
+
+<Tabs>
+  <Tab title="Stack">
+    **s-stack**: Layout component for arranging content
+    
+    ```tsx
+    <s-stack direction="block" gap="base">
+      {/* Content */}
+    </s-stack>
+    ```
+    
+    Props:
+    - `direction`: "block" (vertical) or "inline" (horizontal)
+    - `gap`: Spacing between children ("base", "small", "large")
+  </Tab>
+  
+  <Tab title="Box">
+    **s-box**: Container with padding and borders
+    
+    ```tsx
+    <s-box padding="base" border="base" borderRadius="base">
+      {/* Content */}
+    </s-box>
+    ```
+    
+    Props:
+    - `padding`: Internal spacing
+    - `border`: Border width
+    - `borderRadius`: Corner rounding
+  </Tab>
+  
+  <Tab title="Text Components">
+    **s-heading**: Heading text
+    ```tsx
+    <s-heading>{translate('title')}</s-heading>
+    ```
+    
+    **s-text**: Body text
+    ```tsx
+    <s-text>{translate('content')}</s-text>
+    ```
+  </Tab>
+  
+  <Tab title="Button">
+    **s-button**: Interactive button
+    
+    ```tsx
+    <s-button variant="secondary" href={url}>
+      {label}
+    </s-button>
+    ```
+    
+    Props:
+    - `variant`: "primary", "secondary", or "plain"
+    - `href`: Link destination
+  </Tab>
+  
+  <Tab title="Banner">
+    **s-banner**: Informational banner
+    
+    ```tsx
+    <s-banner tone="info">
+      Message text
+    </s-banner>
+    ```
+    
+    Props:
+    - `tone`: "info", "success", "warning", "critical"
+  </Tab>
+</Tabs>
+
+## Shopify API Access
+
+The extension accesses Shopify checkout APIs:
+
+### Shop Information
+
+```tsx
+const shop = shopify.shop;
+const storefrontUrl = shop?.storefrontUrl;
+```
+
+### Order Line Items
+
+```tsx
+const lines = shopify.lines?.value;
+const hasSubscription = lines?.some(
+  (line) => line.merchandise?.sellingPlan?.recurringDeliveries
+);
+```
+
+### Editor Detection
+
+```tsx
+const isEditor = shopify.extension.editor;
+```
+
+### Internationalization
+
+```tsx
+const translate = shopify.i18n.translate;
+const title = translate('title');
+```
+
+## Localization
+
+Translations are defined in locale files:
+
+```json
+{
+  "title": "Manage your subscription",
+  "content": "View and manage your subscription in your customer account.",
+  "manageSubscriptionLink": "Go to account"
+}
+```
+
+Support multiple languages:
+
+<Tabs>
+  <Tab title="English">
+    ```json locales/en.default.json
+    {
+      "title": "Manage your subscription",
+      "content": "View and manage your subscription in your customer account.",
+      "manageSubscriptionLink": "Go to account"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="French">
+    ```json locales/fr.json
+    {
+      "title": "Gérer votre abonnement",
+      "content": "Consultez et gérez votre abonnement dans votre compte client.",
+      "manageSubscriptionLink": "Aller au compte"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Spanish">
+    ```json locales/es.json
+    {
+      "title": "Administra tu suscripción",
+      "content": "Ve y administra tu suscripción en tu cuenta de cliente.",
+      "manageSubscriptionLink": "Ir a la cuenta"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Preact Rendering
+
+The extension uses Preact for lightweight rendering:
+
+```tsx
+import {render} from 'preact';
+
+export default async () => {
+  render(<ThankYouPageManageSubscriptions />, document.body);
+};
+```
+
+### Why Preact?
+
+- **Lightweight**: 3KB alternative to React
+- **Fast**: Excellent performance on checkout pages
+- **Compatible**: Uses React-like API
+- **Optimized**: Ideal for post-purchase extensions
+
+## Testing
+
+Test the extension with different scenarios:
+
+```typescript
+describe('ThankYouPageManageSubscriptions', () => {
+  it('renders when order has subscription', () => {
+    const {getByText} = render(
+      <ThankYouPageManageSubscriptions />,
+      {
+        wrapper: ({children}) => (
+          <MockShopifyProvider hasSubscription={true}>
+            {children}
+          </MockShopifyProvider>
+        ),
+      }
+    );
+    
+    expect(getByText('Manage your subscription')).toBeInTheDocument();
+    expect(getByText('Go to account')).toBeInTheDocument();
+  });
+  
+  it('hides when no subscription items', () => {
+    const {container} = render(
+      <ThankYouPageManageSubscriptions />,
+      {
+        wrapper: ({children}) => (
+          <MockShopifyProvider hasSubscription={false}>
+            {children}
+          </MockShopifyProvider>
+        ),
+      }
+    );
+    
+    expect(container.firstChild).toBeNull();
+  });
+  
+  it('shows banner in editor mode', () => {
+    const {getByText} = render(
+      <ThankYouPageManageSubscriptions />,
+      {
+        wrapper: ({children}) => (
+          <MockShopifyProvider isEditor={true}>
+            {children}
+          </MockShopifyProvider>
+        ),
+      }
+    );
+    
+    expect(getByText(
+      'This extension is only visible for orders with subscriptions.'
+    )).toBeInTheDocument();
+  });
+});
+```
+
+## Styling
+
+The extension uses Shopify's standard styling system:
+
+```tsx
+<s-box 
+  padding="base"      // 16px padding
+  border="base"       // 1px border
+  borderRadius="base" // 8px corners
+>
+  {/* Content */}
+</s-box>
+```
+
+### Spacing Scale
+
+- `small`: 8px
+- `base`: 16px
+- `large`: 24px
+- `extraLarge`: 32px
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Performance">
+    Keep the extension lightweight. Avoid heavy JavaScript or large images. The thank you page should load quickly to maintain a good customer experience.
+  </Accordion>
+  
+  <Accordion title="Visibility">
+    Only show the extension for relevant orders. Use conditional rendering to prevent confusion for one-time purchases.
+  </Accordion>
+  
+  <Accordion title="Clear Messaging">
+    Use clear, concise language. Customers should immediately understand they can manage their subscription and where to go.
+  </Accordion>
+  
+  <Accordion title="Accessibility">
+    Ensure proper contrast ratios and keyboard navigation. All interactive elements should be accessible.
+  </Accordion>
+</AccordionGroup>
+
+## Customization Ideas
+
+### Add Subscription Details
+
+```tsx
+<s-stack direction="block" gap="small">
+  <s-text>Next delivery: {nextDeliveryDate}</s-text>
+  <s-text>Delivery frequency: {frequency}</s-text>
+</s-stack>
+```
+
+### Include Quick Actions
+
+```tsx
+<s-button-group>
+  <s-button href={`${accountURL}/subscriptions/${id}`}>
+    View subscription
+  </s-button>
+  <s-button variant="plain" href={`${accountURL}/subscriptions/${id}/skip`}>
+    Skip next order
+  </s-button>
+</s-button-group>
+```
+
+### Add Promotional Content
+
+```tsx
+<s-banner tone="success">
+  You're saving 15% with this subscription!
+</s-banner>
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Extension not showing">
+    Verify:
+    - Order contains subscription items
+    - Extension is enabled in theme settings
+    - `purchase.thank-you.block.render` target is supported
+  </Accordion>
+  
+  <Accordion title="Link not working">
+    Check:
+    - Storefront URL is correctly formatted
+    - Customer account is enabled
+    - Buyer subscriptions extension is installed
+  </Accordion>
+  
+  <Accordion title="Translations missing">
+    Ensure:
+    - Locale files exist in `/locales` directory
+    - Translation keys match those used in code
+    - Default locale (en.default.json) is present
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Checkout Extensions" href="https://shopify.dev/docs/api/checkout-ui-extensions" icon="book">
+    Official documentation for checkout and post-purchase extensions
+  </Card>
+  <Card title="Buyer Extension" href="/extensions/buyer-subscriptions" icon="arrow-right">
+    Learn about the customer account subscription management extension
+  </Card>
+</CardGroup>

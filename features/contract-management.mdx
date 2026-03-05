@@ -1,0 +1,374 @@
+---
+title: Subscription Contract Management
+description: Manage subscription contracts with pause, resume, cancel, and edit operations
+---
+
+The Shopify Subscriptions Reference App provides comprehensive subscription contract management services that enable you to modify subscription states and configurations.
+
+## Core Contract Operations
+
+<CardGroup cols={2}>
+  <Card title="Pause Subscriptions" icon="pause" href="#pause-service">
+    Temporarily halt subscription billing cycles
+  </Card>
+  <Card title="Resume Subscriptions" icon="play" href="#resume-service">
+    Reactivate paused subscription contracts
+  </Card>
+  <Card title="Cancel Subscriptions" icon="xmark" href="#cancel-service">
+    Permanently terminate subscription contracts
+  </Card>
+  <Card title="Edit Contracts" icon="pen" href="#editing-contracts">
+    Modify subscription details and settings
+  </Card>
+</CardGroup>
+
+## Pause Service
+
+The `SubscriptionContractPauseService` pauses active subscription contracts and optionally sends customer email notifications.
+
+### Implementation
+
+```typescript
+import {SubscriptionContractPauseService} from '~/app/services/SubscriptionContractPauseService';
+
+// Initialize the service
+const pauseService = new SubscriptionContractPauseService(
+  graphql,
+  shopDomain,
+  subscriptionContractId,
+  sendCustomerEmail // Optional: defaults to true
+);
+
+// Execute the pause operation
+await pauseService.run();
+```
+
+### Service Parameters
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  GraphQL client for API communication
+</ParamField>
+
+<ParamField path="shopDomain" type="string" required>
+  Shop domain identifier
+</ParamField>
+
+<ParamField path="subscriptionContractId" type="string" required>
+  Subscription contract GID
+</ParamField>
+
+<ParamField path="sendCustomerEmail" type="boolean" default="true">
+  Whether to send email notification to customer
+</ParamField>
+
+### Key Features
+
+- Uses Shopify's `subscriptionContractPause` mutation
+- Automatic email notification with `SUBSCRIPTION_PAUSED` template
+- Customer email job queuing for asynchronous processing
+- Comprehensive error handling and logging
+- Contract status validation
+
+<Note>
+The pause service automatically enqueues a `CustomerSendEmailJob` if `sendCustomerEmail` is enabled and a customer ID exists.
+</Note>
+
+## Resume Service
+
+The `SubscriptionContractResumeService` reactivates paused subscriptions using the `subscriptionContractActivate` mutation.
+
+### Implementation
+
+```typescript
+import {SubscriptionContractResumeService} from '~/app/services/SubscriptionContractResumeService';
+
+const resumeService = new SubscriptionContractResumeService(
+  graphql,
+  shopDomain,
+  subscriptionContractId
+);
+
+await resumeService.run();
+```
+
+### Service Parameters
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  GraphQL client for API communication
+</ParamField>
+
+<ParamField path="shopDomain" type="string" required>
+  Shop domain identifier
+</ParamField>
+
+<ParamField path="subscriptionContractId" type="string" required>
+  Subscription contract GID
+</ParamField>
+
+### Behavior
+
+1. Executes `subscriptionContractActivate` GraphQL mutation
+2. Validates contract status changes to active
+3. Sends `SUBSCRIPTION_RESUMED` email notification
+4. Logs operation completion and errors
+
+<CodeGroup>
+```typescript Customer Portal Integration
+// From buyer-subscriptions extension
+import {useGraphqlApi, useAppRequest} from 'foundation/Api';
+
+async function handleResumeSubscription() {
+  setLoading(true);
+  const result = await resumeSubscriptionContract(
+    SubscriptionContractResumeMutation,
+    {
+      subscriptionContractId: contractId,
+    },
+  );
+
+  if (result?.subscriptionContractActivate?.contract?.status !== 'ACTIVE') {
+    // Handle error
+    return;
+  }
+
+  onResumeSubscription();
+  sendRequest({contractId, operationName: 'RESUME'});
+}
+```
+
+```graphql Mutation
+mutation SubscriptionContractActivate($subscriptionContractId: ID!) {
+  subscriptionContractActivate(subscriptionContractId: $subscriptionContractId) {
+    contract {
+      id
+      status
+      customer {
+        id
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+</CodeGroup>
+
+## Cancel Service
+
+The `SubscriptionContractCancelService` permanently cancels subscription contracts.
+
+### Implementation
+
+```typescript
+import {SubscriptionContractCancelService} from '~/app/services/SubscriptionContractCancelService';
+
+const cancelService = new SubscriptionContractCancelService(
+  graphql,
+  shopDomain,
+  subscriptionContractId
+);
+
+await cancelService.run();
+```
+
+### Cancel Flow
+
+<Steps>
+  <Step title="Initiate Cancellation">
+    Call the service with contract ID and shop domain
+  </Step>
+  
+  <Step title="Execute Mutation">
+    The service runs `subscriptionContractCancel` GraphQL mutation
+  </Step>
+  
+  <Step title="Validate Response">
+    Checks for valid response and user errors
+  </Step>
+  
+  <Step title="Handle Result">
+    Logs success or throws detailed error messages
+  </Step>
+</Steps>
+
+<Warning>
+Cancellation is **permanent** and cannot be undone. Unlike pause operations, cancelled contracts cannot be reactivated.
+</Warning>
+
+### Customer-Facing Cancel Modal
+
+The buyer-subscriptions extension provides a cancel modal component:
+
+```tsx
+import {CancelSubscriptionModal} from '~/components/CancelSubscriptionModal';
+
+<CancelSubscriptionModal
+  contractId={contractId}
+  onCancelSubscription={handleCancellation}
+/>
+```
+
+**Modal Features:**
+- Confirmation dialog with description
+- Error banner for failed operations
+- Loading states during mutation
+- User error message display
+- Status validation (`CANCELLED` confirmation)
+
+## Editing Contracts
+
+### Modifying Subscription Details
+
+Contract modifications are handled through various GraphQL mutations and the customer portal interface:
+
+<Tabs>
+  <Tab title="Delivery Frequency">
+    Update billing and delivery schedules through the admin extension.
+
+    ```typescript
+    // From admin-subs-action extension
+    const {updateSellingPlanGroup} = useUpdateSellingPlanGroup();
+
+    await updateSellingPlanGroup({
+      id: sellingPlanGroupId,
+      input: {
+        merchantCode,
+        name: planName,
+        sellingPlansToUpdate,
+        sellingPlansToCreate,
+        sellingPlansToDelete,
+      },
+    });
+    ```
+  </Tab>
+
+  <Tab title="Payment Method">
+    Customers can update payment methods through the customer portal extension.
+
+    ```typescript
+    // Payment method updates handled via customer account
+    import {useGraphqlApi} from 'foundation/Api';
+
+    const [updatePaymentMethod] = useGraphqlApi();
+    ```
+  </Tab>
+
+  <Tab title="Shipping Address">
+    Modify delivery addresses for active subscriptions.
+
+    ```typescript
+    // Address editing in SubscriptionDetails component
+    <OverviewCard
+      contractId={contractId}
+      shippingAddress={shippingAddress}
+      pickupAddress={pickupAddress}
+      refetchSubscriptionContract={refetchSubscriptionContract}
+    />
+    ```
+  </Tab>
+
+  <Tab title="Skip Billing Cycles">
+    Allow customers to skip upcoming orders.
+
+    ```typescript
+    import {SkipNextOrderModal} from '~/components/SkipNextOrderModal';
+
+    <SkipNextOrderModal
+      contractId={contractId}
+      cycleIndexToSkip={cycleIndex}
+      resumeDate={nextBillingDate}
+      onSkipOrder={handleSkip}
+    />
+    ```
+  </Tab>
+</Tabs>
+
+## Error Handling
+
+All contract management services implement consistent error handling:
+
+```typescript
+try {
+  await this.pauseSubscriptionContract();
+  this.log.info('SubscriptionContractPauseService completed successfully');
+} catch (error) {
+  this.log.error(
+    {error},
+    `Failed to process SubscriptionContractPauseService`,
+  );
+  throw error;
+}
+```
+
+### Common Error Scenarios
+
+<AccordionGroup>
+  <Accordion title="Invalid Response">
+    Service validates response structure and throws errors for missing expected properties.
+
+    ```typescript
+    if (!data || !data.subscriptionContractPause) {
+      throw new Error(
+        'Failed to pause subscription via SubscriptionContractPause',
+      );
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="User Errors">
+    GraphQL user errors are logged and thrown with detailed context.
+
+    ```typescript
+    if (userErrors && userErrors.length !== 0) {
+      this.log.error(
+        {userErrors},
+        'Failed to process SubscriptionContractPause',
+      );
+      throw new Error('Failed to cancel subscription');
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Missing Customer ID">
+    Email notifications are skipped if customer ID is unavailable.
+
+    ```typescript
+    if (
+      subscriptionContractPause.contract?.customer?.id &&
+      this.sendCustomerEmail
+    ) {
+      jobs.enqueue(new CustomerSendEmailJob({...}));
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Logging and Monitoring
+
+All services use pino logger with contextual information:
+
+```typescript
+const log = logger.child({shopDomain, subscriptionContractId});
+
+log.info('SubscriptionContractPauseService completed successfully');
+log.error({error}, 'Failed to process service');
+```
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Billing Schedule" icon="calendar" href="/features/billing-schedule">
+    Configure billing cycles and processing
+  </Card>
+  <Card title="Customer Portal" icon="user" href="/features/customer-portal">
+    Customer-facing management features
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/features/webhooks">
+    Contract lifecycle event handling
+  </Card>
+  <Card title="Admin Extensions" icon="puzzle-piece" href="/features/admin-extensions">
+    Shopify admin integration
+  </Card>
+</CardGroup>

@@ -1,0 +1,480 @@
+---
+title: 'SubscriptionContract Model'
+description: 'API reference for managing Shopify subscription contracts and billing cycles'
+---
+
+# SubscriptionContract Model
+
+The SubscriptionContract model provides functions for querying and managing subscription contracts, including billing cycles, customer information, and contract details.
+
+## Functions
+
+### getContracts
+
+Retrieves a paginated list of subscription contracts with filtering options.
+
+```typescript
+export async function getContracts(
+  graphql: GraphQLClient,
+  variables: SubscriptionContractsQueryVariables,
+): Promise<{
+  subscriptionContracts: SubscriptionContractListItem[];
+  subscriptionContractPageInfo: PaginationInfo;
+  hasContractsWithInventoryError: boolean;
+}>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="variables" type="SubscriptionContractsQueryVariables" required>
+  Query variables for filtering and pagination
+  
+  <Expandable title="properties">
+    <ParamField path="first" type="number">
+      Number of items to return (forward pagination)
+    </ParamField>
+    <ParamField path="after" type="string">
+      Cursor for forward pagination
+    </ParamField>
+    <ParamField path="query" type="string">
+      Search query for filtering contracts
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="subscriptionContracts" type="SubscriptionContractListItem[]">
+  Array of formatted subscription contracts
+  
+  <Expandable title="SubscriptionContractListItem properties">
+    <ResponseField name="id" type="string">
+      Global ID of the subscription contract
+    </ResponseField>
+    <ResponseField name="customer" type="object">
+      Customer information
+    </ResponseField>
+    <ResponseField name="deliveryPolicy" type="RecurringPolicy">
+      Delivery frequency configuration
+    </ResponseField>
+    <ResponseField name="status" type="SubscriptionContractStatusType">
+      Contract status: "ACTIVE" | "PAUSED" | "CANCELLED" | "FAILED" | "EXPIRED" | "STALE"
+    </ResponseField>
+    <ResponseField name="totalPrice" type="Money">
+      Total price of the subscription
+    </ResponseField>
+    <ResponseField name="lines" type="SubscriptionContractListItemLine[]">
+      Line items in the contract
+    </ResponseField>
+    <ResponseField name="lineCount" type="number">
+      Total number of line items
+    </ResponseField>
+    <ResponseField name="billingAttempts" type="BillingAttempt[]">
+      Recent billing attempts
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="subscriptionContractPageInfo" type="PaginationInfo">
+  Pagination information
+</ResponseField>
+
+<ResponseField name="hasContractsWithInventoryError" type="boolean">
+  Whether any contracts have inventory-related billing errors
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { getContracts } from '~/models/SubscriptionContract/SubscriptionContract.server';
+import { authenticate } from '~/shopify.server';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  const url = new URL(request.url);
+  
+  const {
+    subscriptionContracts,
+    subscriptionContractPageInfo,
+    hasContractsWithInventoryError,
+  } = await getContracts(admin.graphql, {
+    first: 50,
+    after: url.searchParams.get('after'),
+    query: 'status:ACTIVE',
+  });
+  
+  return json({
+    subscriptionContracts,
+    subscriptionContractPageInfo,
+    hasContractsWithInventoryError,
+  });
+}
+```
+
+---
+
+### getContractDetails
+
+Retrieves detailed information about a specific subscription contract.
+
+```typescript
+export async function getContractDetails(
+  graphql: GraphQLClient,
+  id: string,
+): Promise<SubscriptionContractDetails>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Global ID of the subscription contract
+</ParamField>
+
+<ResponseField name="return" type="SubscriptionContractDetails">
+  Detailed subscription contract information
+  
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">
+      Global ID of the contract
+    </ResponseField>
+    <ResponseField name="status" type="SubscriptionContractStatusType">
+      Current contract status
+    </ResponseField>
+    <ResponseField name="lines" type="SubscriptionContractDetailsLine[]">
+      Line items with pricing information
+    </ResponseField>
+    <ResponseField name="billingPolicy" type="RecurringPolicy">
+      Billing frequency configuration
+    </ResponseField>
+    <ResponseField name="deliveryPolicy" type="RecurringPolicy">
+      Delivery frequency configuration
+    </ResponseField>
+    <ResponseField name="nextBillingDate" type="string">
+      ISO date string of the next billing date
+    </ResponseField>
+    <ResponseField name="customer" type="Customer">
+      Customer details including addresses
+    </ResponseField>
+    <ResponseField name="deliveryMethod" type="SubscriptionDeliveryMethod">
+      Delivery method (shipping, local delivery, or pickup)
+    </ResponseField>
+    <ResponseField name="customerPaymentMethod" type="CustomerPaymentMethod">
+      Payment method information
+    </ResponseField>
+    <ResponseField name="priceBreakdownEstimate" type="PriceBreakdown">
+      Price breakdown including subtotal and shipping
+    </ResponseField>
+    <ResponseField name="billingAttempts" type="BillingAttempt[]">
+      Billing attempt history
+    </ResponseField>
+    <ResponseField name="lastPaymentStatus" type="'SUCCEEDED' | 'FAILED' | null">
+      Status of the most recent payment attempt
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { getContractDetails } from '~/models/SubscriptionContract/SubscriptionContract.server';
+
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  const contractId = params.id;
+  
+  const contractDetails = await getContractDetails(
+    admin.graphql,
+    contractId
+  );
+  
+  return json({ contract: contractDetails });
+}
+```
+
+---
+
+### getContractEditDetails
+
+Retrieves contract information optimized for editing operations.
+
+```typescript
+export async function getContractEditDetails(
+  graphql: GraphQLClient,
+  id: string,
+): Promise<SubscriptionContractEditDetails>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Global ID of the subscription contract
+</ParamField>
+
+<ResponseField name="return" type="SubscriptionContractEditDetails">
+  Contract details including current one-time purchase prices for comparison
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { getContractEditDetails } from '~/models/SubscriptionContract/SubscriptionContract.server';
+
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  
+  const contract = await getContractEditDetails(
+    admin.graphql,
+    params.id
+  );
+  
+  return json({ contract });
+}
+```
+
+---
+
+### getContractDetailsForRebilling
+
+Retrieves contract information needed for rebilling operations.
+
+```typescript
+export async function getContractDetailsForRebilling(
+  graphql: GraphQLClient,
+  id: string,
+): Promise<SubscriptionContract>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Global ID of the subscription contract
+</ParamField>
+
+<ResponseField name="return" type="SubscriptionContract">
+  Contract data required for rebilling operations
+</ResponseField>
+
+---
+
+### findSubscriptionContractWithBillingCycle
+
+Retrieves a subscription contract along with a specific billing cycle.
+
+```typescript
+export async function findSubscriptionContractWithBillingCycle({
+  shop,
+  contractId,
+  date,
+}: FindSubscriptionContractWithBillingCycleArgs): Promise<{
+  subscriptionContract: SubscriptionContract;
+  subscriptionBillingCycle: SubscriptionBillingCycle;
+}>
+```
+
+<ParamField path="shop" type="string" required>
+  Shop domain (e.g., "mystore.myshopify.com")
+</ParamField>
+
+<ParamField path="contractId" type="string" required>
+  Global ID of the subscription contract
+</ParamField>
+
+<ParamField path="date" type="string" required>
+  ISO date string for the billing cycle to retrieve
+</ParamField>
+
+<ResponseField name="subscriptionContract" type="SubscriptionContract">
+  The subscription contract
+</ResponseField>
+
+<ResponseField name="subscriptionBillingCycle" type="SubscriptionBillingCycle">
+  The billing cycle for the specified date, including billing attempts
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { findSubscriptionContractWithBillingCycle } from '~/models/SubscriptionContract/SubscriptionContract.server';
+
+const { subscriptionContract, subscriptionBillingCycle } =
+  await findSubscriptionContractWithBillingCycle({
+    shop: 'mystore.myshopify.com',
+    contractId: 'gid://shopify/SubscriptionContract/123',
+    date: '2024-03-15',
+  });
+
+const billingAttempts = subscriptionBillingCycle.billingAttempts.edges;
+```
+
+---
+
+### getContractCustomerId
+
+Retrieves the customer ID for a subscription contract.
+
+```typescript
+export async function getContractCustomerId(
+  shopDomain: string,
+  subscriptionContractId: string,
+): Promise<string>
+```
+
+<ParamField path="shopDomain" type="string" required>
+  Shop domain
+</ParamField>
+
+<ParamField path="subscriptionContractId" type="string" required>
+  Global ID of the subscription contract
+</ParamField>
+
+<ResponseField name="return" type="string">
+  Global ID of the customer
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { getContractCustomerId } from '~/models/SubscriptionContract/SubscriptionContract.server';
+
+const customerId = await getContractCustomerId(
+  'mystore.myshopify.com',
+  'gid://shopify/SubscriptionContract/123'
+);
+```
+
+---
+
+### getProductVariantPrice
+
+Retrieves the current price of a product variant.
+
+```typescript
+export async function getProductVariantPrice(
+  graphql: GraphQLClient,
+  productVariantId: string,
+): Promise<number>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="productVariantId" type="string" required>
+  Global ID of the product variant
+</ParamField>
+
+<ResponseField name="return" type="number">
+  Current price of the variant, or -1 if not found
+</ResponseField>
+
+## Type Definitions
+
+### SubscriptionContractDetails
+
+```typescript
+interface SubscriptionContractDetails {
+  id: string;
+  status: SubscriptionContractStatusType;
+  lines: SubscriptionContractDetailsLine[];
+  billingPolicy: RecurringPolicy;
+  deliveryPolicy: RecurringPolicy;
+  nextBillingDate?: string;
+  originOrder?: Order | null;
+  priceBreakdownEstimate?: PriceBreakdown | null;
+  customerPaymentMethod?: CustomerPaymentMethod | null;
+  customer?: Customer;
+  deliveryMethod?: SubscriptionDeliveryMethod | null;
+  billingAttempts: { id: string }[];
+  lastPaymentStatus?: 'SUCCEEDED' | 'FAILED' | null;
+  lastBillingAttemptErrorType?: string | null;
+}
+```
+
+### SubscriptionContractListItem
+
+```typescript
+interface SubscriptionContractListItem {
+  id: string;
+  customer: SubscriptionContractListItemCustomer;
+  deliveryPolicy: RecurringPolicy;
+  status: SubscriptionContractStatusType;
+  totalPrice?: Money;
+  lines: SubscriptionContractListItemLine[];
+  lineCount: number;
+  billingAttempts: BillingAttempt[];
+}
+```
+
+### SubscriptionContractStatusType
+
+```typescript
+type SubscriptionContractStatusType =
+  | 'ACTIVE'
+  | 'PAUSED'
+  | 'CANCELLED'
+  | 'FAILED'
+  | 'EXPIRED'
+  | 'STALE';
+```
+
+### Money
+
+```typescript
+interface Money {
+  amount: number;
+  currencyCode: string;
+}
+```
+
+### RecurringPolicy
+
+```typescript
+interface RecurringPolicy {
+  interval: 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
+  intervalCount: number;
+}
+```
+
+### BillingAttempt
+
+```typescript
+interface BillingAttempt {
+  id: string;
+  errorCode?: string | null;
+  processingError?: BillingAttemptProcessingError | null;
+}
+```
+
+### Customer
+
+```typescript
+interface Customer {
+  id: string;
+  email?: string | null;
+  displayName?: string | null;
+  addresses: FormattedAddressWithId[];
+}
+```
+
+### PriceBreakdown
+
+```typescript
+interface PriceBreakdown {
+  totalPrice?: Money;
+  subtotalPrice: Money;
+  totalTax?: Money;
+  totalShippingPrice: Money;
+}
+```
+
+## Related
+
+- [SellingPlan Model](/api/models/selling-plan)
+- [DunningTracker Model](/api/models/dunning-tracker)
+- [BillingSchedule Model](/api/models/billing-schedule)

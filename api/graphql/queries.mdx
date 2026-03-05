@@ -1,0 +1,1212 @@
+---
+title: GraphQL Queries
+description: GraphQL queries used in the Shopify Subscriptions Reference App
+---
+
+This page documents all GraphQL queries used throughout the app for fetching data from Shopify's GraphQL Admin API.
+
+## Bulk Operations
+
+### BulkOperationQuery
+
+Fetches the status of the current bulk operation.
+
+```graphql
+query BulkOperationQuery {
+  currentBulkOperation(type: MUTATION) {
+    id
+    status
+    rootObjectCount
+  }
+}
+```
+
+## Customer Queries
+
+### CustomerWithContractsAndBillingAttempts
+
+Retrieves a customer's subscription contracts and their most recent billing attempts.
+
+**Variables:**
+- `customerId` (ID!): The customer's ID
+
+```graphql
+query CustomerWithContractsAndBillingAttempts($customerId: ID!) {
+  customer(id: $customerId) {
+    id
+    subscriptionContracts(first: 20, reverse: true) {
+      edges {
+        node {
+          id
+          status
+          lastPaymentStatus
+          app {
+            id
+          }
+          billingAttempts(first: 1, reverse: true) {
+            edges {
+              node {
+                originTime
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+## Metaobject Queries
+
+### MetaobjectByHandle
+
+Fetches a metaobject by its handle.
+
+**Variables:**
+- `handle` (MetaobjectHandleInput!): The metaobject handle
+
+```graphql
+query MetaobjectByHandle($handle: MetaobjectHandleInput!) {
+  metaobjectByHandle(handle: $handle) {
+    id
+    fields {
+      key
+      value
+      type
+    }
+  }
+}
+```
+
+### MetaobjectById
+
+Fetches a metaobject by its ID.
+
+**Variables:**
+- `id` (ID!): The metaobject ID
+
+```graphql
+query MetaobjectById($id: ID!) {
+  metaobject(id: $id) {
+    id
+    fields {
+      key
+      value
+      type
+    }
+  }
+}
+```
+
+### MetaobjectDefinitionByType
+
+Fetches a metaobject definition by its type.
+
+**Variables:**
+- `type` (String!): The metaobject type
+
+```graphql
+query MetaobjectDefinitionByType($type: String!) {
+  metaobjectDefinitionByType(type: $type) {
+    id
+    name
+    type
+    fieldDefinitions {
+      key
+      name
+      description
+      required
+    }
+  }
+}
+```
+
+### Metaobjects
+
+Fetches a list of metaobjects by type.
+
+**Variables:**
+- `type` (String!): The metaobject type
+- `sortKey` (String): Optional sort key
+- `first` (Int!): Number of records to fetch
+
+```graphql
+query Metaobjects($type: String!, $sortKey: String, $first: Int!) {
+  metaobjects(first: $first, type: $type, sortKey: $sortKey, reverse: true) {
+    edges {
+      node {
+        id
+        fields {
+          key
+          value
+          type
+        }
+      }
+    }
+  }
+}
+```
+
+## Payment Queries
+
+### PaymentUpdateDetails
+
+Fetches details needed for updating a customer's payment method.
+
+**Variables:**
+- `contractId` (ID!): The subscription contract ID
+
+```graphql
+query PaymentUpdateDetails($contractId: ID!) {
+  shop {
+    name
+    contactEmail
+  }
+  subscriptionContract(id: $contractId) {
+    id
+    customer {
+      email
+    }
+    customerPaymentMethod(showRevoked: true) {
+      id
+    }
+  }
+}
+```
+
+## Product Queries
+
+### ProductVariantPrice
+
+Fetches the price of a product variant.
+
+**Variables:**
+- `id` (ID!): The product variant ID
+
+```graphql
+query ProductVariantPrice($id: ID!) {
+  productVariant(id: $id) {
+    id
+    price
+  }
+}
+```
+
+## Selling Plan Queries
+
+### SellingPlanGroup
+
+Fetches detailed information about a selling plan group.
+
+**Variables:**
+- `id` (ID!): The selling plan group ID
+- `firstProducts` (Int): Number of products to fetch (default: 1)
+- `productsAfter` (String): Cursor for product pagination
+- `variantsAfter` (String): Cursor for variant pagination
+
+```graphql
+query SellingPlanGroup(
+  $id: ID!
+  $firstProducts: Int = 1
+  $productsAfter: String
+  $variantsAfter: String
+) {
+  sellingPlanGroup(id: $id) {
+    id
+    name
+    merchantCode
+    sellingPlans(first: 31) {
+      edges {
+        node {
+          id
+          billingPolicy {
+            ... on SellingPlanRecurringBillingPolicy {
+              interval
+              intervalCount
+            }
+            ... on SellingPlanFixedBillingPolicy {
+              remainingBalanceChargeTrigger
+            }
+          }
+          pricingPolicies {
+            ... on SellingPlanFixedPricingPolicy {
+              adjustmentType
+              adjustmentValue {
+                ... on SellingPlanPricingPolicyPercentageValue {
+                  percentage
+                }
+                ... on MoneyV2 {
+                  amount
+                  currencyCode
+                }
+              }
+            }
+            ... on SellingPlanRecurringPricingPolicy {
+              adjustmentType
+            }
+            ... on SellingPlanPricingPolicyBase {
+              adjustmentType
+            }
+          }
+        }
+      }
+    }
+    products(first: $firstProducts, after: $productsAfter) {
+      edges {
+        node {
+          id
+          featuredImage {
+            id
+            altText
+            transformedSrc: url(transform: {maxWidth: 100, maxHeight: 100})
+          }
+          totalVariants
+          title
+        }
+      }
+      pageInfo {
+        hasNextPage
+        hasPreviousPage
+        endCursor
+      }
+    }
+    productVariants(first: $firstProducts, after: $variantsAfter) {
+      edges {
+        node {
+          id
+          product {
+            id
+            featuredImage {
+              id
+              altText
+              transformedSrc: url(transform: {maxWidth: 100, maxHeight: 100})
+            }
+            totalVariants
+            title
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        hasPreviousPage
+        endCursor
+      }
+    }
+    productsCount {
+      count
+    }
+    productVariantsCount {
+      count
+    }
+  }
+}
+```
+
+### SellingPlanGroups
+
+Fetches a paginated list of selling plan groups.
+
+**Variables:**
+- `first` (Int): Number of records to fetch forward
+- `last` (Int): Number of records to fetch backward
+- `before` (String): Cursor for backward pagination
+- `after` (String): Cursor for forward pagination
+- `query` (String): Search query
+- `sortKey` (SellingPlanGroupSortKeys): Sort key
+- `reverse` (Boolean): Reverse sort order
+
+```graphql
+query SellingPlanGroups(
+  $first: Int
+  $last: Int
+  $before: String
+  $after: String
+  $query: String
+  $sortKey: SellingPlanGroupSortKeys
+  $reverse: Boolean
+) {
+  sellingPlanGroups(
+    first: $first
+    last: $last
+    before: $before
+    after: $after
+    query: $query
+    sortKey: $sortKey
+    reverse: $reverse
+  ) {
+    edges {
+      cursor
+      node {
+        id
+        name
+        createdAt
+        merchantCode
+        options
+        summary
+        productsCount {
+          count
+        }
+        productVariantsCount {
+          count
+        }
+        sellingPlans(first: 5) {
+          edges {
+            node {
+              options
+              pricingPolicies {
+                ... on SellingPlanFixedPricingPolicy {
+                  adjustmentType
+                  adjustmentValue {
+                    ... on SellingPlanPricingPolicyPercentageValue {
+                      percentage
+                    }
+                    ... on MoneyV2 {
+                      amount
+                      currencyCode
+                    }
+                  }
+                }
+                ... on SellingPlanRecurringPricingPolicy {
+                  adjustmentType
+                }
+              }
+              deliveryPolicy {
+                ... on SellingPlanRecurringDeliveryPolicy {
+                  interval
+                  intervalCount
+                }
+                ... on SellingPlanFixedDeliveryPolicy {
+                  cutoff
+               }
+              }
+            }
+          }
+          pageInfo {
+            hasNextPage
+          }
+        }
+        products(first: 5) {
+          edges {
+            node {
+              id
+              title
+            }
+          }
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      hasPreviousPage
+      startCursor
+      endCursor
+    }
+  }
+}
+```
+
+### SellingPlanTranslations
+
+Fetches selling plan group data for translation purposes.
+
+**Variables:**
+- `id` (ID!): The selling plan group ID
+- `sellingPlanLimit` (Int): Number of selling plans to fetch (default: 31)
+
+```graphql
+query SellingPlanTranslations(
+  $id: ID!
+  $sellingPlanLimit: Int = 31
+) {
+  sellingPlanGroup(id: $id) {
+    id
+    name
+    merchantCode
+    sellingPlans(first: $sellingPlanLimit) {
+      edges {
+        node {
+          id
+          deliveryPolicy {
+            ... on SellingPlanRecurringDeliveryPolicy {
+              interval
+              intervalCount
+            }
+          }
+          pricingPolicies {
+            ... on SellingPlanFixedPricingPolicy {
+              adjustmentType
+              adjustmentValue {
+                ... on SellingPlanPricingPolicyPercentageValue {
+                  percentage
+                }
+                ... on MoneyV2 {
+                  amount
+                  currencyCode
+                }
+              }
+            }
+            ... on SellingPlanRecurringPricingPolicy {
+              adjustmentType
+            }
+            ... on SellingPlanPricingPolicyBase {
+              adjustmentType
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+## Shop Queries
+
+### ShopLocales
+
+Fetches the shop's available locales.
+
+```graphql
+query getShopLocales {
+  shopLocales {
+    primary
+    locale
+    published
+  }
+}
+```
+
+### Shop
+
+Fetches basic shop information.
+
+```graphql
+query Shop {
+  shop {
+    id
+    name
+    ianaTimezone
+    primaryDomain {
+      url
+    }
+    myshopifyDomain
+    currencyCode
+    contactEmail
+    email
+  }
+}
+```
+
+## Subscription Contract Queries
+
+### SubscriptionBillingAttempt
+
+Fetches details of a subscription billing attempt.
+
+**Variables:**
+- `billingAttemptId` (ID!): The billing attempt ID
+
+```graphql
+query SubscriptionBillingAttempt($billingAttemptId: ID!) {
+  subscriptionBillingAttempt(id: $billingAttemptId) {
+    id
+    originTime
+    ready
+    subscriptionContract {
+      id
+    }
+  }
+}
+```
+
+### SubscriptionBillingCycleByIndex
+
+Fetches a billing cycle by its index.
+
+**Variables:**
+- `contractId` (ID!): The subscription contract ID
+- `billingCycleIndex` (Int!): The billing cycle index
+
+```graphql
+query SubscriptionBillingCycleByIndex(
+  $contractId: ID!,
+  $billingCycleIndex: Int!,
+) {
+  subscriptionBillingCycle(
+    billingCycleInput: {
+    contractId: $contractId,
+    selector: {
+      index: $billingCycleIndex
+    }
+  }) {
+    cycleStartAt
+    cycleEndAt
+    billingAttemptExpectedDate
+  }
+}
+```
+
+### SubscriptionBillingCycles
+
+Fetches billing cycles within a date range.
+
+**Variables:**
+- `contractId` (ID!): The subscription contract ID
+- `first` (Int!): Number of records to fetch
+- `startDate` (DateTime!): Range start date
+- `endDate` (DateTime!): Range end date
+
+```graphql
+query SubscriptionBillingCycles($contractId: ID!, $first: Int!, $startDate: DateTime!, $endDate: DateTime!) {
+  subscriptionBillingCycles(
+    contractId: $contractId,
+    first: $first,
+    billingCyclesDateRangeSelector: { startDate: $startDate, endDate: $endDate }
+  ) {
+    edges {
+      node {
+        billingAttemptExpectedDate
+        cycleIndex
+        skipped
+        billingAttempts(first: 10) {
+          edges {
+            node {
+              id
+              order {
+                id
+                createdAt
+              }
+            }
+          }
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+    }
+  }
+}
+```
+
+### SubscriptionContractCustomer
+
+Fetches the customer associated with a subscription contract.
+
+**Variables:**
+- `id` (ID!): The subscription contract ID
+
+```graphql
+query SubscriptionContractCustomerQuery($id: ID!) {
+  subscriptionContract(id: $id) {
+    customer {
+      id
+    }
+  }
+}
+```
+
+### SubscriptionContractDetails
+
+Fetches comprehensive details about a subscription contract.
+
+**Variables:**
+- `id` (ID!): The subscription contract ID
+
+```graphql
+query SubscriptionContractDetails($id: ID!) {
+  subscriptionContract(id: $id) {
+    id
+    status
+    currencyCode
+    lines(first: 50) {
+      edges {
+        node {
+          id
+          title
+          variantTitle
+          quantity
+          productId
+          variantId
+          currentPrice {
+            currencyCode
+            amount
+          }
+          lineDiscountedPrice {
+            currencyCode
+            amount
+          }
+          variantImage {
+            altText
+            url
+          }
+          pricingPolicy {
+            basePrice {
+              currencyCode
+              amount
+            }
+            cycleDiscounts {
+              adjustmentType
+              adjustmentValue {
+                ... on MoneyV2 {
+                  amount
+                  currencyCode
+                }
+                ... on SellingPlanPricingPolicyPercentageValue {
+                  percentage
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    billingPolicy {
+      interval
+      intervalCount
+    }
+    nextBillingDate
+    deliveryPolicy {
+      interval
+      intervalCount
+    }
+    originOrder {
+      id
+      name
+      createdAt
+    }
+    lastPaymentStatus
+    lastBillingAttemptErrorType
+    billingAttempts(first: 5) {
+      edges {
+        node {
+          id
+        }
+      }
+    }
+    deliveryMethod {
+      __typename
+      ... on SubscriptionDeliveryMethodShipping {
+        shippingOption {
+          title
+        }
+        address {
+          id
+          address1
+          address2
+          city
+          province
+          firstName
+          lastName
+          provinceCode
+          countryCode: countryCodeV2
+          zip
+          phone
+        }
+      }
+      ... on SubscriptionDeliveryMethodPickup {
+        pickupOption {
+          title
+        }
+      }
+      ... on SubscriptionDeliveryMethodLocalDelivery {
+        localDeliveryOption {
+          title
+          phone
+        }
+        address {
+          id
+          address1
+          address2
+          city
+          province
+          firstName
+          lastName
+          provinceCode
+          countryCode: countryCodeV2
+          zip
+          phone
+        }
+      }
+    }
+    deliveryPrice {
+      amount
+      currencyCode
+    }
+    discounts(first: 10) {
+      edges {
+        node {
+          id
+          title
+          targetType
+        }
+      }
+    }
+    customer {
+      id
+      email
+      displayName
+      email
+      addresses {
+        id
+        formattedArea
+        firstName
+        lastName
+        company
+        address1
+        address2
+        city
+        phone
+        countryCode: countryCodeV2
+        provinceCode
+        zip
+      }
+    }
+    customerPaymentMethod(showRevoked: true) {
+      id
+      revokedAt
+      instrument {
+        __typename
+        ... on CustomerCreditCard {
+          brand
+          lastDigits
+          maskedNumber
+          expiryYear
+          expiryMonth
+          expiresSoon
+          source
+        }
+        ... on CustomerShopPayAgreement {
+          lastDigits
+          maskedNumber
+          expiryYear
+          expiryMonth
+          expiresSoon
+        }
+        ... on CustomerPaypalBillingAgreement {
+          paypalAccountEmail
+        }
+      }
+    }
+  }
+}
+```
+
+### SubscriptionContractDraftDiscounts
+
+Fetches discounts applied to a subscription draft.
+
+**Variables:**
+- `id` (ID!): The subscription draft ID
+
+```graphql
+query SubscriptionContractDraftDiscounts($id: ID!) {
+  subscriptionDraft(
+    id: $id
+  ) {
+    id
+    discounts(first:10) {
+      edges {
+        node {
+          ... on SubscriptionAppliedCodeDiscount {
+            id
+          }
+          ... on SubscriptionManualDiscount {
+            id
+            entitledLines {
+              all
+              lines(first:50) {
+                edges {
+                  node {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### SubscriptionContractEditDetails
+
+Fetches details needed for editing a subscription contract.
+
+**Variables:**
+- `id` (ID!): The subscription contract ID
+
+```graphql
+query SubscriptionContractEditDetails($id: ID!) {
+  subscriptionContract(id: $id) {
+    id
+    status
+    currencyCode
+    lines(first: 50) {
+      edges {
+        node {
+          id
+          title
+          variantTitle
+          quantity
+          productId
+          variantId
+          currentPrice{
+            amount
+            currencyCode
+          }
+          lineDiscountedPrice {
+            currencyCode
+            amount
+          }
+          variantImage {
+            altText
+            url
+          }
+          pricingPolicy {
+            basePrice {
+              currencyCode
+              amount
+            }
+            cycleDiscounts {
+              computedPrice {
+                amount
+                currencyCode
+              }
+              afterCycle
+              adjustmentType
+              adjustmentValue {
+                ... on MoneyV2 {
+                  amount
+                  currencyCode
+                }
+                ... on SellingPlanPricingPolicyPercentageValue {
+                  percentage
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    deliveryPolicy {
+      interval
+      intervalCount
+    }
+    deliveryMethod {
+      __typename
+      ... on SubscriptionDeliveryMethodShipping {
+        shippingOption {
+          title
+        }
+      }
+      ... on SubscriptionDeliveryMethodPickup {
+        pickupOption {
+          title
+        }
+      }
+      ... on SubscriptionDeliveryMethodLocalDelivery {
+        localDeliveryOption {
+          title
+        }
+      }
+    }
+    deliveryPrice {
+      amount
+      currencyCode
+    }
+    discounts(first: 10) {
+      edges {
+        node {
+          id
+          title
+          targetType
+        }
+      }
+    }
+  }
+}
+```
+
+### SubscriptionContractRebilling
+
+Fetches the last payment status for a subscription contract.
+
+**Variables:**
+- `id` (ID!): The subscription contract ID
+
+```graphql
+query SubscriptionContractRebillingQuery($id: ID!) {
+  subscriptionContract(id: $id) {
+    id
+    lastPaymentStatus
+  }
+}
+```
+
+### SubscriptionContractWithBillingCycle
+
+Fetches a subscription contract with a specific billing cycle.
+
+**Variables:**
+- `contractId` (ID!): The subscription contract ID
+- `date` (DateTime!): The billing cycle date
+
+```graphql
+query SubscriptionContractWithBillingCycle(
+  $contractId: ID!
+  $date: DateTime!
+) {
+  subscriptionContract(id: $contractId) {
+    id
+    status
+    customer {
+      id
+    }
+  }
+  subscriptionBillingCycle(
+    billingCycleInput: {contractId: $contractId, selector: {date: $date}}
+  ) {
+    cycleIndex
+    billingAttemptExpectedDate
+    status
+    billingAttempts(first: 20) {
+      edges {
+        node {
+          ready
+          originTime
+        }
+      }
+    }
+  }
+}
+```
+
+### SubscriptionContracts
+
+Fetches a paginated list of subscription contracts.
+
+**Variables:**
+- `first` (Int): Number of records to fetch forward
+- `last` (Int): Number of records to fetch backward
+- `before` (String): Cursor for backward pagination
+- `after` (String): Cursor for forward pagination
+- `query` (String): Search query
+- `sortKey` (SubscriptionContractsSortKeys): Sort key
+- `reverse` (Boolean): Reverse sort order
+
+```graphql
+query SubscriptionContracts(
+  $first: Int
+  $last: Int
+  $before: String
+  $after: String,
+  $query: String,
+  $sortKey: SubscriptionContractsSortKeys,
+  $reverse: Boolean,
+) {
+  subscriptionContracts(
+    first: $first
+    last: $last
+    before: $before
+    after: $after
+    query: $query
+    sortKey: $sortKey
+    reverse: $reverse,
+  ) {
+    edges {
+      node {
+        id
+        currencyCode
+        customer {
+          id
+          displayName
+        }
+        status
+        deliveryPolicy {
+          interval
+          intervalCount
+        }
+        linesCount {
+          count
+        }
+        billingAttempts(first: 1, reverse: true) {
+          edges {
+            node {
+              id
+              errorCode
+              processingError {
+                code
+                ... on SubscriptionBillingAttemptInsufficientStockProductVariantsError {
+                  insufficientStockProductVariants(first: 5) {
+                    edges {
+                      node {
+                        id
+                        title
+                        image {
+                          url
+                          altText
+                        }
+                        product {
+                          featuredMedia {
+                            preview {
+                              image {
+                                altText
+                                url
+                              }
+                            }
+                          }
+                          id
+                          title
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        lines(first: 50) {
+          edges {
+            node {
+              id
+              productId
+              title
+              lineDiscountedPrice {
+                amount
+                currencyCode
+              }
+            }
+          }
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      hasPreviousPage
+      endCursor
+      startCursor
+    }
+  }
+  contractsWithInventoryError: subscriptionContracts(
+    first: 1,
+    query: "NOT status:CANCELLED AND last_billing_attempt_error_type:inventory_error",
+  ) {
+    edges {
+      node {
+        id
+      }
+    }
+  }
+}
+```
+
+### SubscriptionPastBillingCycles
+
+Fetches past billing cycles with their billing attempts.
+
+**Variables:**
+- `contractId` (ID!): The subscription contract ID
+- `numberOfCycles` (Int!): Number of billing cycles to fetch
+- `numberOfAttempts` (Int!): Number of billing attempts per cycle
+- `startDate` (DateTime!): Range start date
+- `endDate` (DateTime!): Range end date
+
+```graphql
+query SubscriptionPastBillingCycles(
+  $contractId: ID!,
+  $numberOfCycles: Int!,
+  $numberOfAttempts: Int!,
+  $startDate: DateTime!,
+  $endDate: DateTime!
+) {
+  subscriptionBillingCycles(
+    contractId: $contractId,
+    first: $numberOfCycles,
+    billingCyclesDateRangeSelector: { startDate: $startDate, endDate: $endDate },
+    reverse: true
+  ) {
+    edges {
+      node {
+        billingAttemptExpectedDate
+        cycleIndex
+        skipped
+        status
+        billingAttempts(first: $numberOfAttempts, reverse: true) {
+          edges {
+            node {
+              id
+              order {
+                id
+                createdAt
+              }
+              processingError {
+                code
+                ... on SubscriptionBillingAttemptInsufficientStockProductVariantsError {
+                  insufficientStockProductVariants(first: 5) {
+                    edges {
+                      node {
+                        id
+                        title
+                        image {
+                          url
+                          altText
+                        }
+                        product {
+                          featuredMedia {
+                            preview {
+                              image {
+                                altText
+                                url
+                              }
+                            }
+                          }
+                          id
+                          title
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+## Translation Queries
+
+### TranslatableResourcesByIds
+
+Fetches translatable resources by their IDs.
+
+**Variables:**
+- `first` (Int): Number of records to fetch
+- `resourceIds` ([ID!]!): Array of resource IDs
+
+```graphql
+query getTranslatableResourcesById(
+  $first: Int
+  $resourceIds: [ID!]!
+  ) {
+  translatableResourcesByIds(first: $first, resourceIds: $resourceIds) {
+    edges {
+      node {
+        resourceId
+        translatableContent {
+          key
+          value
+          digest
+          locale
+        }
+      }
+    }
+  }
+}
+```

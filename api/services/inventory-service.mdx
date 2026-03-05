@@ -1,0 +1,291 @@
+---
+title: 'Inventory Service'
+description: 'Service for handling inventory-related billing failures'
+---
+
+## Overview
+
+The `InventoryService` handles billing failures caused by insufficient inventory or missing inventory allocations. It implements a retry mechanism similar to payment dunning but with separate configuration and notification behavior.
+
+## InventoryService
+
+Manages inventory-related billing failures with configurable retry attempts and merchant notifications.
+
+### Constructor
+
+<ParamField path="shopDomain" type="string" required>
+  The shop domain for the subscription
+</ParamField>
+
+<ParamField path="contract" type="SubscriptionContract" required>
+  The subscription contract object with billing cycle data
+</ParamField>
+
+<ParamField path="billingCycle" type="SubscriptionBillingCycle" required>
+  The current billing cycle with billing attempts
+</ParamField>
+
+<ParamField path="settings" type="Settings" required>
+  Shop settings including:
+  - `inventoryRetryAttempts`: Number of retry attempts (default: 5)
+  - `inventoryDaysBetweenRetryAttempts`: Days between retries (default: 1)
+  - `inventoryOnFailure`: Action to take on final failure (cancel, pause, skip)
+  - `inventoryNotificationFrequency`: When to notify merchant ('immediately' or other)
+</ParamField>
+
+<ParamField path="failureReason" type="string" required>
+  The reason for the inventory failure ('INSUFFICIENT_INVENTORY' or 'INVENTORY_ALLOCATIONS_NOT_FOUND')
+</ParamField>
+
+### Methods
+
+#### run()
+
+Executes the inventory failure handling workflow.
+
+<ResponseField name="return" type="Promise<InventoryServiceResult>">
+  Returns one of the following result codes:
+  - `BILLING_ATTEMPT_NOT_READY`: Billing attempt is not yet ready to process
+  - `BILLING_CYCLE_ALREADY_BILLED`: Billing cycle has already been successfully billed
+  - `CONTRACT_IN_TERMINAL_STATUS`: Contract is expired or cancelled
+  - `EXPECTED_DATE_IN_FUTURE`: Billing date hasn't arrived yet
+  - `INSUFFICIENT_INVENTORY`: Processed as insufficient inventory failure
+  - `INVENTORY_ALLOCATIONS_NOT_FOUND`: Processed as missing allocations failure
+</ResponseField>
+
+**Decision Logic:**
+
+1. **Validation Checks**:
+   - Ensures billing attempt is ready
+   - Checks if billing date is in the past
+   - Verifies billing cycle is not already billed
+   - Confirms contract is not in terminal status
+
+2. **Dunning Tracker**: Creates or retrieves dunning tracker for idempotency
+
+3. **Merchant Notification**: Sends immediate notification if configured
+
+4. **Retry Logic**:
+   - If attempts ≥ `inventoryRetryAttempts`: Execute `FinalAttemptDunningService`
+   - Otherwise: Execute `RetryDunningService`
+
+**Key Differences from Payment Dunning:**
+- No customer emails are sent for inventory failures
+- Merchant notifications can be sent immediately
+- Uses separate retry attempt configuration
+- No penultimate attempt handling
+
+### Usage Example
+
+```typescript
+import { InventoryService } from '~/services/InventoryService';
+
+const inventoryService = new InventoryService({
+  shopDomain: 'example.myshopify.com',
+  contract: subscriptionContract,
+  billingCycle: currentBillingCycle,
+  settings: {
+    inventoryRetryAttempts: 5,
+    inventoryDaysBetweenRetryAttempts: 1,
+    inventoryOnFailure: 'pause',
+    inventoryNotificationFrequency: 'immediately'
+  },
+  failureReason: 'INSUFFICIENT_INVENTORY'
+});
+
+const result = await inventoryService.run();
+
+switch (result) {
+  case 'INSUFFICIENT_INVENTORY':
+    console.log('Inventory failure handled, retry scheduled');
+    break;
+  case 'CONTRACT_IN_TERMINAL_STATUS':
+    console.log('Contract is already terminated');
+    break;
+  case 'EXPECTED_DATE_IN_FUTURE':
+    console.log('Billing date not yet reached');
+    break;
+  // Handle other cases...
+}
+```
+
+## Inventory Failure Reasons
+
+### INSUFFICIENT_INVENTORY
+
+Triggered when the subscription product doesn't have enough inventory to fulfill the order.
+
+**Common Causes:**
+- Product is out of stock
+- Inventory quantity is less than the subscription line item quantity
+- Inventory is tracked but not available at the fulfillment location
+
+### INVENTORY_ALLOCATIONS_NOT_FOUND
+
+Triggered when inventory allocations cannot be found for the subscription products.
+
+**Common Causes:**
+- Product variant has been deleted
+- Inventory tracking has been disabled
+- Product configuration has changed
+
+## Configuration
+
+### Default Values
+
+The service uses sensible defaults if inventory-specific settings are not configured:
+
+```typescript
+const DEFAULT_INVENTORY_DAYS_BETWEEN_RETRY_ATTEMPTS = 1;
+const DEFAULT_INVENTORY_RETRY_ATTEMPTS = 5;
+
+const inventoryRetryAttempts = 
+  settings.inventoryRetryAttempts ?? DEFAULT_INVENTORY_RETRY_ATTEMPTS;
+  
+const inventoryDaysBetweenRetryAttempts = 
+  settings.inventoryDaysBetweenRetryAttempts ?? DEFAULT_INVENTORY_DAYS_BETWEEN_RETRY_ATTEMPTS;
+```
+
+### Recommended Settings
+
+```typescript
+const inventorySettings = {
+  // Retry more frequently than payment failures
+  inventoryRetryAttempts: 5,
+  inventoryDaysBetweenRetryAttempts: 1, // Daily retries
+  
+  // Pause rather than cancel for inventory issues
+  inventoryOnFailure: 'pause',
+  
+  // Notify merchant immediately so they can restock
+  inventoryNotificationFrequency: 'immediately'
+};
+```
+
+## Merchant Notifications
+
+### Immediate Notification
+
+When `inventoryNotificationFrequency` is set to `'immediately'`, a merchant email is sent on every inventory failure:
+
+```typescript
+if (settings.inventoryNotificationFrequency === 'immediately') {
+  const job = new SendInventoryFailureEmailJob({
+    shop: shopDomain,
+    payload: {
+      frequency: 'immediately'
+    }
+  });
+  await jobs.enqueue(job);
+}
+```
+
+### Final Attempt Notification
+
+On the final attempt, a merchant notification is always sent (unless explicitly disabled):
+
+```typescript
+await new FinalAttemptDunningService({
+  shop: shopDomain,
+  subscriptionContract: contract,
+  billingCycleIndex: billingCycle.cycleIndex,
+  onFailure: settings.inventoryOnFailure,
+  merchantEmailTemplateName: MerchantEmailTemplateName.SubscriptionInventoryFailureMerchant,
+  sendCustomerEmail: false // No customer notification for inventory issues
+}).run();
+```
+
+## Complete Flow Example
+
+```typescript
+import { InventoryService } from '~/services/InventoryService';
+import { MerchantEmailTemplateName } from '~/services/MerchantSendEmailService';
+
+// Called from subscription_billing_attempts/create webhook
+const handleInventoryFailure = async (billingAttempt) => {
+  const contract = await getSubscriptionContract(billingAttempt.contractId);
+  const billingCycle = await getBillingCycle(billingAttempt.billingCycleId);
+  const settings = await getShopSettings(shopDomain);
+
+  // Check if failure is inventory-related
+  const inventoryFailureReasons = [
+    'INSUFFICIENT_INVENTORY',
+    'INVENTORY_ALLOCATIONS_NOT_FOUND'
+  ];
+
+  if (!inventoryFailureReasons.includes(billingAttempt.errorCode)) {
+    // Not an inventory failure, use DunningService instead
+    return;
+  }
+
+  // Execute inventory failure workflow
+  const inventoryService = new InventoryService({
+    shopDomain: 'example.myshopify.com',
+    contract,
+    billingCycle,
+    settings: {
+      inventoryRetryAttempts: 5,
+      inventoryDaysBetweenRetryAttempts: 1,
+      inventoryOnFailure: 'pause',
+      inventoryNotificationFrequency: 'immediately'
+    },
+    failureReason: billingAttempt.errorCode
+  });
+
+  const result = await inventoryService.run();
+
+  // Attempt 1-4: Retry scheduled for next day, merchant notified immediately
+  // Attempt 5: Contract paused, final merchant notification sent
+};
+```
+
+## Comparison with DunningService
+
+| Feature | InventoryService | DunningService |
+|---------|------------------|----------------|
+| **Purpose** | Inventory failures | Payment failures |
+| **Customer Emails** | No | Yes |
+| **Merchant Emails** | Yes (immediate option) | Yes (final attempt only) |
+| **Default Retry Attempts** | 5 | Configurable |
+| **Default Days Between** | 1 day | Configurable |
+| **Penultimate Handling** | No | Yes |
+| **Final Actions** | Cancel/Pause/Skip | Cancel/Pause/Skip |
+
+## Integration with Webhook
+
+```typescript
+import { InventoryService } from '~/services/InventoryService';
+import { DunningService } from '~/services/DunningService';
+
+export const handleBillingAttemptFailure = async (webhookPayload) => {
+  const { error_code, contract_id, billing_cycle_index } = webhookPayload;
+
+  const contract = await getSubscriptionContract(contract_id);
+  const billingCycle = await getBillingCycle(contract_id, billing_cycle_index);
+  const settings = await getShopSettings(webhookPayload.shop);
+
+  // Route to appropriate service based on failure reason
+  const inventoryFailures = [
+    'INSUFFICIENT_INVENTORY',
+    'INVENTORY_ALLOCATIONS_NOT_FOUND'
+  ];
+
+  const service = inventoryFailures.includes(error_code)
+    ? new InventoryService({
+        shopDomain: webhookPayload.shop,
+        contract,
+        billingCycle,
+        settings,
+        failureReason: error_code
+      })
+    : new DunningService({
+        shopDomain: webhookPayload.shop,
+        contract,
+        billingCycle,
+        settings,
+        failureReason: error_code
+      });
+
+  return await service.run();
+};
+```

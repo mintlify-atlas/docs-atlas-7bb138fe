@@ -1,0 +1,796 @@
+---
+title: GraphQL Mutations
+description: GraphQL mutations used in the Shopify Subscriptions Reference App
+---
+
+This page documents all GraphQL mutations used throughout the app for modifying data in Shopify's GraphQL Admin API.
+
+## Billing Cycle Mutations
+
+### ChargeBillingCycles
+
+Initiates a bulk charge operation for billing cycles within a date range.
+
+**Variables:**
+- `startDate` (DateTime!): Start date for billing cycle range
+- `endDate` (DateTime!): End date for billing cycle range
+- `contractStatus` ([SubscriptionContractSubscriptionStatus!]): Filter by contract status
+- `billingCycleStatus` ([SubscriptionBillingCycleBillingCycleStatus!]): Filter by billing cycle status
+- `billingAttemptStatus` (SubscriptionBillingCycleBillingAttemptStatus): Filter by billing attempt status
+
+```graphql
+mutation ChargeBillingCycles(
+  $startDate: DateTime!
+  $endDate: DateTime!
+  $contractStatus: [SubscriptionContractSubscriptionStatus!]
+  $billingCycleStatus: [SubscriptionBillingCycleBillingCycleStatus!]
+  $billingAttemptStatus: SubscriptionBillingCycleBillingAttemptStatus
+) {
+  subscriptionBillingCycleBulkCharge(
+    billingAttemptExpectedDateRange: {
+      startDate: $startDate
+      endDate: $endDate
+    }
+    filters: {
+      contractStatus: $contractStatus,
+      billingCycleStatus: $billingCycleStatus,
+      billingAttemptStatus: $billingAttemptStatus
+    }
+  ) {
+    job {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionBillingCycleChargeIndex
+
+Charges a specific billing cycle by index.
+
+**Variables:**
+- `subscriptionContractId` (ID!): The subscription contract ID
+- `inventoryPolicy` (SubscriptionBillingAttemptInventoryPolicy): Inventory policy (default: PRODUCT_VARIANT_INVENTORY_POLICY)
+- `index` (Int!): The billing cycle index
+
+```graphql
+mutation SubscriptionBillingCycleChargeIndexMutation(
+  $subscriptionContractId: ID!
+  $inventoryPolicy: SubscriptionBillingAttemptInventoryPolicy = PRODUCT_VARIANT_INVENTORY_POLICY
+  $index: Int!
+) {
+  subscriptionBillingCycleCharge(
+    subscriptionContractId: $subscriptionContractId
+    inventoryPolicy: $inventoryPolicy
+    billingCycleSelector: {
+      index: $index
+    }
+  ) {
+    subscriptionBillingAttempt {
+      id
+      ready
+    }
+    userErrors {
+      field
+      message
+      code
+    }
+  }
+}
+```
+
+### SubscriptionBillingCycleCharge
+
+Charges a billing cycle by date.
+
+**Variables:**
+- `subscriptionContractId` (ID!): The subscription contract ID
+- `originTime` (DateTime!): The billing cycle date
+
+```graphql
+mutation SubscriptionBillingCycleChargeMutation(
+  $subscriptionContractId: ID!
+  $originTime: DateTime!
+) {
+  subscriptionBillingCycleCharge(
+    subscriptionContractId: $subscriptionContractId
+    billingCycleSelector: {
+      date: $originTime
+    }
+  ) {
+    subscriptionBillingAttempt {
+      id
+      ready
+    }
+    userErrors {
+      field
+      message
+      code
+    }
+  }
+}
+```
+
+### SubscriptionBillingCycleScheduleEdit
+
+Edits the schedule of a billing cycle (e.g., to skip it).
+
+**Variables:**
+- `billingCycleInput` (SubscriptionBillingCycleInput!): Billing cycle selector
+- `input` (SubscriptionBillingCycleScheduleEditInput!): Schedule edit details
+
+```graphql
+mutation SubscriptionBillingCycleScheduleEdit($billingCycleInput: SubscriptionBillingCycleInput!, $input: SubscriptionBillingCycleScheduleEditInput!) {
+  subscriptionBillingCycleScheduleEdit(
+    billingCycleInput: $billingCycleInput,
+    input: $input
+  ) {
+    billingCycle {
+      skipped
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+## Customer Payment Mutations
+
+### CustomerPaymentMethodSendUpdateEmail
+
+Sends an email to the customer to update their payment method.
+
+**Variables:**
+- `customerPaymentMethodId` (ID!): The customer payment method ID
+- `emailInput` (EmailInput): Optional email customization
+
+```graphql
+mutation CustomerPaymentMethodSendUpdateEmail(
+  $customerPaymentMethodId: ID!
+  $emailInput: EmailInput
+) {
+  customerPaymentMethodSendUpdateEmail(
+    customerPaymentMethodId: $customerPaymentMethodId
+    email: $emailInput
+  ) {
+    customer {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+## Metaobject Mutations
+
+### MetaobjectCreate
+
+Creates a new metaobject.
+
+**Variables:**
+- `metaobject` (MetaobjectCreateInput!): The metaobject data
+
+```graphql
+mutation MetaobjectCreate($metaobject: MetaobjectCreateInput!) {
+  metaobjectCreate(metaobject: $metaobject) {
+    metaobject {
+      id
+      fields {
+        key
+        value
+        type
+      }
+    }
+    userErrors {
+      code
+      message
+      field
+    }
+  }
+}
+```
+
+### MetaobjectDefinitionCreate
+
+Creates a new metaobject definition.
+
+**Variables:**
+- `definition` (MetaobjectDefinitionCreateInput!): The definition data
+
+```graphql
+mutation MetaobjectDefinitionCreate($definition: MetaobjectDefinitionCreateInput!) {
+  metaobjectDefinitionCreate(definition: $definition) {
+    metaobjectDefinition {
+      id
+      name
+      type
+      fieldDefinitions {
+        key
+        name
+        type {
+          name
+        }
+        description
+        required
+      }
+    }
+    userErrors {
+      code
+      field
+      message
+    }
+  }
+}
+```
+
+### MetaobjectDefinitionUpdate
+
+Updates an existing metaobject definition.
+
+**Variables:**
+- `id` (ID!): The metaobject definition ID
+- `definition` (MetaobjectDefinitionUpdateInput!): The updated definition data
+
+```graphql
+mutation MetaobjectDefinitionUpdate($id: ID!, $definition: MetaobjectDefinitionUpdateInput!) {
+  metaobjectDefinitionUpdate(id: $id, definition: $definition) {
+    metaobjectDefinition {
+      id
+      name
+      type
+      fieldDefinitions {
+        key
+        name
+        description
+        required
+        type {
+          name
+        }
+      }
+    }
+    userErrors {
+      code
+      field
+      message
+    }
+  }
+}
+```
+
+### MetaobjectUpdate
+
+Updates an existing metaobject.
+
+**Variables:**
+- `id` (ID!): The metaobject ID
+- `metaobject` (MetaobjectUpdateInput!): The updated metaobject data
+
+```graphql
+mutation MetaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
+  metaobjectUpdate(id: $id, metaobject: $metaobject) {
+    metaobject {
+      id
+      fields {
+        key
+        value
+        type
+      }
+    }
+    userErrors {
+      code
+      message
+      field
+    }
+  }
+}
+```
+
+### MetaobjectUpsert
+
+Creates or updates a metaobject by handle.
+
+**Variables:**
+- `handle` (MetaobjectHandleInput!): The metaobject handle
+- `metaobject` (MetaobjectUpsertInput!): The metaobject data
+
+```graphql
+mutation MetaobjectUpsert($handle: MetaobjectHandleInput!, $metaobject: MetaobjectUpsertInput!) {
+  metaobjectUpsert(handle: $handle, metaobject: $metaobject) {
+    metaobject {
+      id
+      fields {
+        key
+        value
+        type
+      }
+    }
+    userErrors {
+      code
+      message
+      field
+    }
+  }
+}
+```
+
+## Order Mutations
+
+### OrderTagsAdd
+
+Adds tags to an order.
+
+**Variables:**
+- `id` (ID!): The order ID
+- `tags` ([String!]!): Array of tags to add
+
+```graphql
+mutation tagsAdd($id: ID!, $tags: [String!]!) {
+  tagsAdd(id: $id, tags: $tags) {
+    node {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+## Selling Plan Mutations
+
+### CreateSellingPlanGroup
+
+Creates a new selling plan group.
+
+**Variables:**
+- `input` (SellingPlanGroupInput!): The selling plan group data
+- `resources` (SellingPlanGroupResourceInput): Associated products/variants
+
+```graphql
+mutation CreateSellingPlanGroup(
+  $input: SellingPlanGroupInput!
+  $resources: SellingPlanGroupResourceInput
+) {
+  sellingPlanGroupCreate(input: $input, resources: $resources) {
+    sellingPlanGroup {
+      id
+      sellingPlans(first: 31) {
+        edges {
+          node {
+            ...SellingPlanDetails
+          }
+        }
+      }
+    }
+    userErrors {
+      message
+    }
+  }
+}
+```
+
+<Note>
+This mutation uses the `SellingPlanDetails` fragment. See the [Fragments](/api/graphql/fragments) page for details.
+</Note>
+
+### DeleteSellingPlanGroup
+
+Deletes a selling plan group.
+
+**Variables:**
+- `id` (ID!): The selling plan group ID
+
+```graphql
+mutation DeleteSellingPlanGroup($id: ID!) {
+  sellingPlanGroupDelete(id: $id) {
+    deletedSellingPlanGroupId
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SellingPlanGroupUpdate
+
+Updates a selling plan group and manages its product associations.
+
+**Variables:**
+- `id` (ID!): The selling plan group ID
+- `input` (SellingPlanGroupInput!): The updated selling plan group data
+- `productIdsToAdd` ([ID!]!): Products to add
+- `productIdsToRemove` ([ID!]!): Products to remove
+- `productVariantIdsToAdd` ([ID!]!): Product variants to add
+- `productVariantIdsToRemove` ([ID!]!): Product variants to remove
+
+```graphql
+mutation SellingPlanGroupUpdate(
+  $id: ID!
+  $input: SellingPlanGroupInput!
+  $productIdsToAdd: [ID!]!
+  $productIdsToRemove: [ID!]!
+  $productVariantIdsToAdd: [ID!]!
+  $productVariantIdsToRemove: [ID!]!
+) {
+  sellingPlanGroupUpdate(id: $id, input: $input) {
+    sellingPlanGroup {
+      id
+      sellingPlans(first: 31) {
+        edges {
+          node {
+            ...SellingPlanDetails
+          }
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+  sellingPlanGroupAddProducts(id: $id, productIds: $productIdsToAdd) {
+    userErrors {
+      field
+      message
+    }
+  }
+  sellingPlanGroupRemoveProducts(id: $id, productIds: $productIdsToRemove) {
+    userErrors {
+      field
+      message
+    }
+  }
+  sellingPlanGroupAddProductVariants(
+    id: $id
+    productVariantIds: $productVariantIdsToAdd
+  ) {
+    userErrors {
+      field
+      message
+    }
+  }
+  sellingPlanGroupRemoveProductVariants(
+    id: $id
+    productVariantIds: $productVariantIdsToRemove
+  ) {
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+<Note>
+This mutation uses the `SellingPlanDetails` fragment. See the [Fragments](/api/graphql/fragments) page for details.
+</Note>
+
+## Subscription Contract Mutations
+
+### SubscriptionContractAtomicCreate
+
+Creates a new subscription contract atomically.
+
+**Variables:**
+- `input` (SubscriptionContractAtomicCreateInput!): The subscription contract data
+
+```graphql
+mutation SubscriptionContractAtomicCreate($input: SubscriptionContractAtomicCreateInput!) {
+  subscriptionContractAtomicCreate(input: $input) {
+    contract {
+      id
+    }
+    userErrors {
+      code
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionContractCancel
+
+Cancels a subscription contract.
+
+**Variables:**
+- `subscriptionContractId` (ID!): The subscription contract ID
+
+```graphql
+mutation SubscriptionContractCancel($subscriptionContractId: ID!) {
+  subscriptionContractCancel(subscriptionContractId: $subscriptionContractId) {
+    contract {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionContractFail
+
+Manually marks a subscription contract as failed.
+
+**Variables:**
+- `subscriptionContractId` (ID!): The subscription contract ID
+
+```graphql
+mutation subscriptionContractFail($subscriptionContractId: ID!) {
+  subscriptionContractFail(subscriptionContractId: $subscriptionContractId) {
+    contract {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionContractPause
+
+Pauses a subscription contract.
+
+**Variables:**
+- `subscriptionContractId` (ID!): The subscription contract ID
+
+```graphql
+mutation SubscriptionContractPause($subscriptionContractId: ID!) {
+  subscriptionContractPause(subscriptionContractId: $subscriptionContractId) {
+    contract {
+      id
+      customer {
+        id
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionContractResume
+
+Resumes (activates) a paused subscription contract.
+
+**Variables:**
+- `subscriptionContractId` (ID!): The subscription contract ID
+
+```graphql
+mutation SubscriptionContractResume($subscriptionContractId: ID!) {
+  subscriptionContractActivate(subscriptionContractId: $subscriptionContractId) {
+    contract {
+      id
+      customer {
+        id
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionContractUpdate
+
+Creates a draft to update a subscription contract.
+
+**Variables:**
+- `contractId` (ID!): The subscription contract ID
+
+```graphql
+mutation SubscriptionContractUpdate($contractId: ID!) {
+  subscriptionContractUpdate(contractId: $contractId) {
+    draft {
+      id
+    }
+    userErrors {
+      code
+      field
+      message
+    }
+  }
+}
+```
+
+## Subscription Draft Mutations
+
+### SubscriptionContractDraftAddLine
+
+Adds a line item to a subscription draft.
+
+**Variables:**
+- `draftId` (ID!): The subscription draft ID
+- `input` (SubscriptionLineInput!): The line item data
+
+```graphql
+mutation SubscriptionContractDraftAddLine(
+  $draftId: ID!
+  $input: SubscriptionLineInput!
+) {
+  subscriptionDraftLineAdd(draftId: $draftId, input: $input) {
+    lineAdded {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionContractDraftCommit
+
+Commits a subscription draft, applying the changes to the contract.
+
+**Variables:**
+- `draftId` (ID!): The subscription draft ID
+
+```graphql
+mutation SubscriptionDraftCommit($draftId: ID!) {
+  subscriptionDraftCommit(draftId: $draftId) {
+    contract {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionContractDraftRemoveDiscount
+
+Removes a discount from a subscription draft.
+
+**Variables:**
+- `draftId` (ID!): The subscription draft ID
+- `discountId` (ID!): The discount ID
+
+```graphql
+mutation SubscriptionContractDraftRemoveDiscount(
+  $draftId: ID!
+  $discountId: ID!
+) {
+  subscriptionDraftDiscountRemove(
+    draftId: $draftId
+    discountId: $discountId
+  ) {
+    draft {
+      id
+    }
+    userErrors{
+      code
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionContractDraftRemoveLine
+
+Removes a line item from a subscription draft.
+
+**Variables:**
+- `draftId` (ID!): The subscription draft ID
+- `lineId` (ID!): The line item ID
+
+```graphql
+mutation SubscriptionDraftLineRemove($draftId: ID!, $lineId: ID!) {
+  subscriptionDraftLineRemove(draftId: $draftId, lineId: $lineId) {
+    lineRemoved {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionContractDraftUpdate
+
+Updates a subscription draft.
+
+**Variables:**
+- `draftId` (ID!): The subscription draft ID
+- `input` (SubscriptionDraftInput!): The updated draft data
+
+```graphql
+mutation SubscriptionDraftUpdate(
+  $draftId: ID!
+  $input: SubscriptionDraftInput!
+) {
+  subscriptionDraftUpdate(draftId: $draftId, input: $input) {
+    draft {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### SubscriptionDraftUpdateLine
+
+Updates a line item in a subscription draft.
+
+**Variables:**
+- `draftId` (ID!): The subscription draft ID
+- `input` (SubscriptionLineUpdateInput!): The updated line item data
+- `lineId` (ID!): The line item ID
+
+```graphql
+mutation SubscriptionDraftLineUpdate(
+  $draftId: ID!
+  $input: SubscriptionLineUpdateInput!
+  $lineId: ID!
+) {
+  subscriptionDraftLineUpdate(
+    draftId: $draftId
+    input: $input
+    lineId: $lineId
+  ) {
+    lineUpdated {
+      id
+      variantId
+      quantity
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+## Translation Mutations
+
+### TranslationsRegister
+
+Registers translations for a resource.
+
+**Variables:**
+- `resourceId` (ID!): The resource ID to translate
+- `translations` ([TranslationInput!]!): Array of translations
+
+```graphql
+mutation translationsRegister($resourceId: ID!, $translations: [TranslationInput!]!) {
+  translationsRegister(resourceId: $resourceId, translations: $translations) {
+    userErrors {
+      message
+      field
+    }
+    translations {
+      key
+      value
+    }
+  }
+}
+```

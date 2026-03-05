@@ -1,0 +1,290 @@
+---
+title: 'Job System Overview'
+description: 'Learn about the JobRunner system for managing background jobs in the Shopify Subscriptions Reference App'
+---
+
+## Architecture
+
+The Shopify Subscriptions Reference App uses a custom JobRunner system to manage background jobs. The system provides a flexible architecture that supports multiple execution strategies through different schedulers.
+
+### Core Components
+
+#### Job Class
+
+All jobs extend the `Job` base class and implement a `perform()` method:
+
+```typescript
+import {Job} from '~/lib/jobs';
+
+type ExampleParams = {
+  shop: string;
+};
+
+class ExampleJob extends Job<ExampleParams> {
+  async perform() {
+    this.logger.debug('Running ExampleJob');
+    // Job logic here
+  }
+}
+```
+
+The `Job` class provides:
+- Automatic error handling and retry logic
+- Built-in logging with context
+- Terminal error detection (non-retryable errors)
+- JSON serialization for job parameters
+
+#### JobRunner
+
+The `JobRunner` class manages job registration and execution:
+
+```typescript
+import {JobRunner, InlineScheduler} from '~/lib/jobs';
+import {logger} from '~/utils/logger.server';
+
+const scheduler = new InlineScheduler(logger);
+const runner = new JobRunner(scheduler, logger);
+
+// Register job classes
+runner.register(ExampleJob, AnotherJob);
+
+// Enqueue a job
+const job = new ExampleJob({shop: 'example.myshopify.com'});
+await runner.enqueue(job);
+```
+
+See app/jobs/index.ts:54-92 for the production job runner configuration.
+
+## Schedulers
+
+The job system supports three scheduler types:
+
+### Inline Scheduler
+
+Executes jobs immediately when enqueued. Designed for local development:
+
+```typescript
+import {InlineScheduler, JobRunner} from '~/lib/jobs';
+
+const scheduler = new InlineScheduler(logger);
+const runner = new JobRunner(scheduler, logger);
+runner.register(ExampleJob);
+
+const job = new ExampleJob({shop: 'example.myshopify.com'});
+await runner.enqueue(job); // Runs immediately
+```
+
+### Test Scheduler
+
+Stores jobs for inspection without executing them. Designed for testing:
+
+```typescript
+import {TestScheduler, JobRunner} from '~/lib/jobs';
+
+const scheduler = new TestScheduler(logger);
+const runner = new JobRunner(scheduler, logger);
+runner.register(ExampleJob);
+
+const job = new ExampleJob({shop: 'example.myshopify.com'});
+const request = await runner.enqueue(job); // Stores job
+
+// Execute manually in tests
+await runner.execute(request);
+```
+
+### Cloud Task Scheduler
+
+Creates jobs in Google Cloud Tasks for production environments:
+
+```typescript
+import {CloudTaskScheduler, JobRunner} from '~/lib/jobs';
+
+const config = {
+  location: 'us-central1',
+  projectId: 'subscriptions-app-remix',
+  queuePrefix: 'example',
+  callbackUrl: 'http://localhost/internal/jobs/run',
+  serviceAccountEmail: 'example@iam.googlecloud.com',
+  audience: 'http://localhost/',
+};
+
+const scheduler = new CloudTaskScheduler(logger, config);
+const runner = new JobRunner(scheduler, logger);
+runner.register(ExampleJob);
+
+const job = new ExampleJob({shop: 'example.myshopify.com'});
+await runner.enqueue(job); // Creates Cloud Task
+```
+
+## Defining Jobs
+
+<Steps>
+
+### Create a Job Class
+
+Extend the `Job` base class with typed parameters:
+
+```typescript
+import {Job} from '~/lib/jobs';
+import type {Jobs} from '~/types';
+
+type MyJobParams = {
+  shop: string;
+  payload: {
+    orderId: string;
+  };
+};
+
+class MyJob extends Job<MyJobParams> {
+  // Optional: specify a custom queue (defaults to 'default')
+  public queue: string = 'my-queue';
+
+  async perform(): Promise<void> {
+    const {shop, payload} = this.parameters;
+    const {orderId} = payload;
+
+    this.logger.info(`Processing order ${orderId} for ${shop}`);
+    // Your job logic here
+  }
+}
+```
+
+### Register the Job
+
+Add your job to the registry in `app/jobs/index.ts`:
+
+```typescript
+import {MyJob} from './my-job';
+
+export const jobs = (() => {
+  // Scheduler initialization...
+})().register(
+  MyJob,
+  // ... other jobs
+);
+```
+
+### Enqueue the Job
+
+Create and enqueue job instances:
+
+```typescript
+import {jobs} from '~/jobs';
+import {MyJob} from '~/jobs/my-job';
+
+const job = new MyJob({
+  shop: 'example.myshopify.com',
+  payload: {
+    orderId: 'gid://shopify/Order/123',
+  },
+});
+
+await jobs.enqueue(job);
+```
+
+</Steps>
+
+## Scheduling Options
+
+### Schedule for Future Execution
+
+Schedule a job to run at a specific Unix timestamp:
+
+```typescript
+import {DateTime} from 'luxon';
+
+const job = new ExampleJob({shop: 'example.myshopify.com'});
+
+await runner.enqueue(job, {
+  scheduleTime: {
+    seconds: DateTime.utc(2024, 4, 3, 16, 24).toUnixInteger(),
+  },
+});
+```
+
+### Custom Dispatch Deadline
+
+Override the default dispatch deadline (10 minutes) for long-running jobs:
+
+```typescript
+import {Duration} from 'luxon';
+
+const job = new ExampleJob({shop: 'example.myshopify.com'});
+
+await runner.enqueue(job, {
+  dispatchDeadline: {
+    seconds: Duration.fromObject({minutes: 30}).as('seconds'),
+  },
+});
+```
+
+## Custom Queues
+
+All jobs use the `default` queue by default. To use a custom queue:
+
+<Steps>
+
+### Add Queue to Cloud Tasks Config
+
+```diff
+- tasks:
+  queues:
+    - default
++   - foo
+```
+
+### Deploy Infrastructure Changes
+
+Deploy your updated Cloud Tasks configuration to Google Cloud Platform.
+
+### Set Queue in Job Class
+
+```typescript
+class FooJob extends Job<FooParams> {
+  public queue: string = 'foo';
+
+  async perform() {
+    // Job logic
+  }
+}
+```
+
+</Steps>
+
+## Error Handling
+
+### Terminal Errors
+
+Terminal errors are non-retryable and stop job execution:
+
+- `SessionNotFoundError` - Shop session not found
+- HTTP 401, 402, 403, 404, 423 responses from Shopify API
+- `MaxMetaobjectDefinitionsExceededError`
+
+See app/lib/jobs/Job.ts:32 for the complete terminal error detection logic.
+
+### Retryable Errors
+
+All other errors trigger automatic retry according to the scheduler's retry policy. Jobs are automatically retried by Cloud Tasks until they succeed or reach the maximum retry limit.
+
+## Logging
+
+Every job has access to a contextual logger:
+
+```typescript
+class MyJob extends Job<MyJobParams> {
+  async perform() {
+    this.logger.info('Job started');
+    this.logger.debug({details: 'extra info'}, 'Processing item');
+    this.logger.error({error}, 'Job failed');
+  }
+}
+```
+
+The logger automatically includes job name and parameters in all log entries.
+
+## Related
+
+- [Billing Jobs](/api/jobs/billing-jobs)
+- [Dunning Jobs](/api/jobs/dunning-jobs)
+- [Email Jobs](/api/jobs/email-jobs)

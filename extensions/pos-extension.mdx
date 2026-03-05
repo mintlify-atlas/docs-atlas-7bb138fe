@@ -1,0 +1,736 @@
+---
+title: POS Extension
+description: Point of Sale extension for adding subscriptions to in-person purchases
+---
+
+The POS extension enables merchants to add subscriptions to products during in-person sales at Point of Sale. It provides a tile on the POS home screen and line item actions for managing subscriptions.
+
+## Extension Configuration
+
+Configured in `shopify.extension.toml`:
+
+```toml
+api_version = "2025-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "pos-extension"
+handle = "pos-extension"
+description = "Subscriptions"
+
+# Home screen tile
+[[extensions.targeting]]
+module = "./src/Tile.tsx"
+target = "pos.home.tile.render"
+
+# Home screen modal
+[[extensions.targeting]]
+module = "./src/TileModal.tsx"
+target = "pos.home.modal.render"
+
+# Line item action button
+[[extensions.targeting]]
+module = "./src/MenuItem.tsx"
+target = "pos.cart.line-item-details.action.menu-item.render"
+
+# Line item action modal
+[[extensions.targeting]]
+module = "./src/MenuItemModal.tsx"
+target = "pos.cart.line-item-details.action.render"
+```
+
+## Extension Targets
+
+The POS extension renders at four different surfaces:
+
+<Tabs>
+  <Tab title="Home Tile">
+    **Target**: `pos.home.tile.render`
+    
+    Displays a tile on the POS home screen showing subscription status:
+
+    ```tsx
+    import {render} from 'preact';
+    import {useSellingPlanTile} from './hooks/useSellingPlanTile';
+
+    const TileComponent = () => {
+      const {title, subtitle, enabled, disabledReason, onCartChange} =
+        useSellingPlanTile(
+          shopify.cart.current.value,
+          i18n,
+          shopify.session.currentSession.posVersion,
+        );
+
+      shopify.cart.current.subscribe((cart) => {
+        onCartChange(cart);
+      });
+
+      return (
+        <s-tile
+          heading={title}
+          subheading={subtitle}
+          onClick={() => shopify.action.presentModal()}
+          disabled={!enabled}
+        />
+      );
+    };
+
+    export default async () => {
+      render(
+        <I18nProvider locale={shopify.locale}>
+          <TileComponent />
+        </I18nProvider>,
+        document.body,
+      );
+    };
+    ```
+  </Tab>
+  
+  <Tab title="Home Modal">
+    **Target**: `pos.home.modal.render`
+    
+    Shows eligible line items when tile is clicked:
+
+    ```tsx
+    import {render} from 'preact';
+
+    const TileModal = () => {
+      return (
+        <EligibleLineItemsScreen
+          cart={shopify.cart}
+          session={shopify.session}
+          i18n={i18n}
+        />
+      );
+    };
+
+    export default async () => {
+      render(
+        <I18nProvider locale={shopify.locale}>
+          <TileModal />
+        </I18nProvider>,
+        document.body,
+      );
+    };
+    ```
+  </Tab>
+  
+  <Tab title="Line Item Menu">
+    **Target**: `pos.cart.line-item-details.action.menu-item.render`
+    
+    Adds a button to line item actions:
+
+    ```tsx
+    import {render} from 'preact';
+
+    const ButtonComponent = () => {
+      const handleButtonPress = () => {
+        shopify.action.presentModal();
+      };
+
+      const hasSellingPlanGroups = 
+        shopify.cartLineItem?.hasSellingPlanGroups;
+      const enabled = hasSellingPlanGroups && versionSupported;
+
+      return (
+        <s-button
+          onClick={handleButtonPress}
+          disabled={!enabled}
+          variant="secondary"
+        />
+      );
+    };
+
+    export default async () => {
+      render(
+        <I18nProvider locale={shopify.locale}>
+          <ButtonComponent />
+        </I18nProvider>,
+        document.body,
+      );
+    };
+    ```
+  </Tab>
+  
+  <Tab title="Line Item Modal">
+    **Target**: `pos.cart.line-item-details.action.render`
+    
+    Shows subscription options for the line item:
+
+    ```tsx
+    import {render} from 'preact';
+    import {SubscriptionScreen} from './screens/SubscriptionScreen';
+
+    const Modal = () => {
+      return (
+        <SubscriptionScreen
+          lineItem={shopify.cartLineItem}
+          cartApi={shopify.cart}
+          productSearch={shopify.productSearch}
+          session={shopify.session}
+          i18n={i18n}
+        />
+      );
+    };
+
+    export default async () => {
+      render(
+        <I18nProvider locale={shopify.locale}>
+          <Modal />
+        </I18nProvider>,
+        document.body,
+      );
+    };
+    ```
+  </Tab>
+</Tabs>
+
+## Subscription Screen
+
+The main interface for selecting subscription plans:
+
+```tsx
+import '@shopify/ui-extensions/preact';
+
+export const SubscriptionScreen = ({
+  lineItem,
+  cartApi,
+  productSearch,
+  session,
+  i18n,
+}: Props) => {
+  const {
+    sellingPlansState,
+    variantState,
+    selectedPlan,
+    setSelectedPlan,
+    handleApplyPress,
+    oneTimePurchasePrice,
+    fetchSellingPlans,
+  } = useSubscriptionScreen(lineItem, cartApi, productSearch, session);
+
+  return (
+    <s-page>
+      <s-button
+        slot="secondary-actions"
+        onClick={handleApplyPress}
+        disabled={!isSuccess(sellingPlansState)}
+      >
+        {i18n.t('SubscriptionScreen.save')}
+      </s-button>
+      <s-scroll-box>
+        <s-stack direction="block" paddingInline="large-100">
+          <VariantInfo
+            productName={getProductNameFromVariant(variantState.data, lineItem)}
+            variantName={getVariantName(variantState.data)}
+            image={getVariantImage(variantState.data)}
+          />
+          {!lineItem.requiresSellingPlan ? (
+            <PlanItem
+              title={i18n.t('SubscriptionScreen.oneTimePurchase')}
+              subtitle={oneTimePurchasePrice}
+              isSelected={selectedPlan === undefined}
+              onSelect={() => setSelectedPlan(undefined)}
+            />
+          ) : null}
+          {sellingPlansState.data.map((group, groupIndex) => (
+            <s-section key={`group-${groupIndex}`} heading={`${group.name}`}>
+              {group.plans.map((plan, planIndex) => (
+                <PlanItem
+                  key={planIndex}
+                  title={plan.name}
+                  subtitle={formatPricingPolicy(plan.pricingPolicy)}
+                  isSelected={selectedPlan?.id === plan.id}
+                  onSelect={() => setSelectedPlan(plan)}
+                />
+              ))}
+            </s-section>
+          ))}
+        </s-stack>
+      </s-scroll-box>
+    </s-page>
+  );
+};
+```
+
+## Custom Hooks
+
+### useSubscriptionScreen
+
+Manages subscription screen state and logic:
+
+```typescript
+export function useSubscriptionScreen(
+  lineItem: LineItem,
+  cartApi: CartApiContent,
+  productSearch: ProductSearchApiContent,
+  session: SessionApiContent,
+) {
+  const [selectedPlan, setSelectedPlan] = useState<SellingPlan | undefined>();
+  const [sellingPlansState, setSellingPlansState] = useState<AsyncState>();
+  const [variantState, setVariantState] = useState<AsyncState>();
+
+  const fetchSellingPlans = async () => {
+    setSellingPlansState({state: 'loading'});
+    
+    try {
+      const result = await query({
+        query: SellingPlansQuery,
+        variables: {id: lineItem.productVariantId},
+      });
+      
+      setSellingPlansState({
+        state: 'success',
+        data: result.data.productVariant.sellingPlanGroups,
+      });
+    } catch (error) {
+      setSellingPlansState({state: 'error', error});
+    }
+  };
+
+  const handleApplyPress = async () => {
+    if (selectedPlan) {
+      await cartApi.applySellingPlanToLineItem(
+        lineItem.id,
+        selectedPlan.id
+      );
+    } else {
+      await cartApi.removeSellingPlanFromLineItem(lineItem.id);
+    }
+    window.close();
+  };
+
+  return {
+    sellingPlansState,
+    variantState,
+    selectedPlan,
+    setSelectedPlan,
+    handleApplyPress,
+    oneTimePurchasePrice: formatPrice(lineItem.price),
+    fetchSellingPlans,
+  };
+}
+```
+
+### useSellingPlanTile
+
+Manages home tile state:
+
+```typescript
+export function useSellingPlanTile(
+  cart: Cart,
+  i18n: PreactI18n,
+  posVersion: string,
+) {
+  const [enabled, setEnabled] = useState(false);
+  const [subtitle, setSubtitle] = useState('');
+  
+  const eligibleItems = cart.lineItems.filter(
+    (item) => item.hasSellingPlanGroups
+  );
+  
+  const subscriptionItems = cart.lineItems.filter(
+    (item) => item.sellingPlan !== null
+  );
+
+  const onCartChange = (newCart: Cart) => {
+    const hasEligible = newCart.lineItems.some(
+      (item) => item.hasSellingPlanGroups
+    );
+    setEnabled(hasEligible);
+    
+    const count = newCart.lineItems.filter(
+      (item) => item.sellingPlan !== null
+    ).length;
+    setSubtitle(
+      i18n.t('Tile.subtitle', {count})
+    );
+  };
+
+  return {
+    title: i18n.t('Tile.title'),
+    subtitle,
+    enabled,
+    disabledReason: enabled ? null : 'no-eligible-items',
+    onCartChange,
+  };
+}
+```
+
+### useSellingPlans
+
+Fetches selling plans via GraphQL:
+
+```typescript
+export function useSellingPlans(variantId: string) {
+  const {query} = useGraphqlQuery();
+  
+  const [state, setState] = useState<AsyncState>({
+    state: 'loading',
+  });
+
+  useEffect(() => {
+    async function fetchPlans() {
+      try {
+        const result = await query({
+          query: SellingPlansQuery,
+          variables: {id: variantId},
+        });
+        
+        const sellingPlanGroups = 
+          result.data.productVariant.sellingPlanGroups.edges.map(
+            (edge) => ({
+              id: edge.node.id,
+              name: edge.node.name,
+              plans: edge.node.sellingPlans.edges.map(
+                (planEdge) => ({
+                  id: planEdge.node.id,
+                  name: planEdge.node.name,
+                  pricingPolicy: planEdge.node.pricingPolicies[0],
+                })
+              ),
+            })
+          );
+        
+        setState({state: 'success', data: sellingPlanGroups});
+      } catch (error) {
+        setState({state: 'error', error: error.message});
+      }
+    }
+    
+    fetchPlans();
+  }, [variantId]);
+
+  return state;
+}
+```
+
+## GraphQL Query
+
+Fetches selling plan data:
+
+```graphql
+query SellingPlansQuery($id: ID!) {
+  productVariant(id: $id) {
+    id
+    title
+    product {
+      id
+      title
+    }
+    image {
+      url
+      altText
+    }
+    sellingPlanGroups(first: 10) {
+      edges {
+        node {
+          id
+          name
+          options
+          sellingPlans(first: 10) {
+            edges {
+              node {
+                id
+                name
+                description
+                billingPolicy {
+                  ... on SellingPlanRecurringBillingPolicy {
+                    interval
+                    intervalCount
+                  }
+                }
+                deliveryPolicy {
+                  ... on SellingPlanRecurringDeliveryPolicy {
+                    interval
+                    intervalCount
+                  }
+                }
+                pricingPolicies {
+                  ... on SellingPlanRecurringPricingPolicy {
+                    adjustmentType
+                    adjustmentValue {
+                      ... on SellingPlanPricingPolicyPercentageValue {
+                        percentage
+                      }
+                      ... on MoneyV2 {
+                        amount
+                        currencyCode
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+## Components
+
+### PlanItem
+
+Displays individual subscription plan options:
+
+```tsx
+interface PlanItemProps {
+  title: string;
+  subtitle?: string;
+  isSelected: boolean;
+  onSelect: () => void;
+}
+
+export const PlanItem = ({
+  title,
+  subtitle,
+  isSelected,
+  onSelect,
+}: PlanItemProps) => {
+  return (
+    <s-selectable
+      selected={isSelected}
+      onClick={onSelect}
+      data-testid="plan-item"
+    >
+      <s-stack direction="block" gap="small">
+        <s-text type="strong">{title}</s-text>
+        {subtitle && <s-text>{subtitle}</s-text>}
+      </s-stack>
+    </s-selectable>
+  );
+};
+```
+
+### VariantInfo
+
+Shows product variant information:
+
+```tsx
+interface VariantInfoProps {
+  productName: string;
+  variantName: string;
+  image?: {url: string; altText: string};
+}
+
+export const VariantInfo = ({
+  productName,
+  variantName,
+  image,
+}: VariantInfoProps) => {
+  return (
+    <s-stack direction="inline" gap="base" alignItems="center">
+      {image && (
+        <s-image
+          src={image.url}
+          alt={image.altText}
+          width="80px"
+          height="80px"
+        />
+      )}
+      <s-stack direction="block" gap="small">
+        <s-text type="strong">{productName}</s-text>
+        <s-text>{variantName}</s-text>
+      </s-stack>
+    </s-stack>
+  );
+};
+```
+
+### EligibleLineItem
+
+Displays line items that can have subscriptions:
+
+```tsx
+export const EligibleLineItem = ({item, onClick}: Props) => {
+  return (
+    <s-selectable onClick={onClick}>
+      <s-stack direction="inline" gap="base">
+        {item.image && (
+          <s-image src={item.image.url} width="60px" height="60px" />
+        )}
+        <s-stack direction="block">
+          <s-text type="strong">{item.productTitle}</s-text>
+          <s-text>{item.variantTitle}</s-text>
+          <s-text>
+            {item.sellingPlan ? item.sellingPlan.name : 'One-time purchase'}
+          </s-text>
+        </s-stack>
+      </s-stack>
+    </s-selectable>
+  );
+};
+```
+
+## Utilities
+
+### Currency Formatting
+
+```typescript
+export function formatPricingPolicy(
+  pricingPolicy: PricingPolicy | null
+): [string, string] | null {
+  if (!pricingPolicy) return null;
+  
+  const {adjustmentType, adjustmentValue} = pricingPolicy;
+  
+  if (adjustmentType === 'PERCENTAGE') {
+    return ['percentage', `${adjustmentValue.percentage}%`];
+  }
+  
+  if (adjustmentType === 'FIXED_AMOUNT') {
+    return ['amount', `$${adjustmentValue.amount}`];
+  }
+  
+  if (adjustmentType === 'PRICE') {
+    return ['price', `$${adjustmentValue.amount}`];
+  }
+  
+  return null;
+}
+```
+
+### Version Comparison
+
+```typescript
+export function isVersionSupported(
+  currentVersion: string,
+  minimumVersion: string
+): boolean {
+  const current = currentVersion.split('.').map(Number);
+  const minimum = minimumVersion.split('.').map(Number);
+  
+  for (let i = 0; i < 3; i++) {
+    if (current[i] > minimum[i]) return true;
+    if (current[i] < minimum[i]) return false;
+  }
+  
+  return true;
+}
+```
+
+### Cart Utilities
+
+```typescript
+export function getProductNameFromVariant(
+  variant: ProductVariant,
+  lineItem: LineItem
+): string {
+  return variant?.product?.title || lineItem.productTitle || '';
+}
+
+export function getVariantName(variant: ProductVariant): string {
+  return variant?.title || '';
+}
+
+export function getVariantImage(
+  variant: ProductVariant
+): {url: string; altText: string} | undefined {
+  return variant?.image
+    ? {
+        url: variant.image.url,
+        altText: variant.image.altText || '',
+      }
+    : undefined;
+}
+```
+
+## Internationalization
+
+The extension supports multiple languages:
+
+```json locales/en.default.json
+{
+  "Tile": {
+    "title": "Subscriptions",
+    "subtitle": "{{count}} subscription items"
+  },
+  "SubscriptionScreen": {
+    "save": "Apply",
+    "oneTimePurchase": "One-time purchase",
+    "noSubscriptionsAvailable": "No subscription options available",
+    "pricingPolicy": {
+      "percentage": "{{percentage}} off",
+      "amount": "${{amount}} off",
+      "price": "${{price}} per delivery"
+    },
+    "emptyView": {
+      "title": "No eligible items",
+      "body": "Add items that support subscriptions to enable this feature.",
+      "goBack": "Go back"
+    },
+    "errorView": {
+      "title": "Error loading subscriptions",
+      "body": "Unable to load subscription options.",
+      "retry": "Retry"
+    }
+  }
+}
+```
+
+## Testing
+
+```typescript
+describe('SubscriptionScreen', () => {
+  it('displays selling plans', async () => {
+    const {findByText} = render(
+      <SubscriptionScreen
+        lineItem={mockLineItem}
+        cartApi={mockCartApi}
+        productSearch={mockProductSearch}
+        session={mockSession}
+        i18n={i18n}
+      />
+    );
+    
+    expect(await findByText('Monthly Subscription')).toBeInTheDocument();
+    expect(await findByText('10% off')).toBeInTheDocument();
+  });
+  
+  it('applies selected plan to line item', async () => {
+    const {getByText} = render(<SubscriptionScreen {...props} />);
+    
+    fireEvent.click(getByText('Monthly Subscription'));
+    fireEvent.click(getByText('Apply'));
+    
+    expect(mockCartApi.applySellingPlanToLineItem).toHaveBeenCalledWith(
+      lineItem.id,
+      'gid://shopify/SellingPlan/123'
+    );
+  });
+});
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Performance">
+    Cache selling plan data to avoid repeated queries. Use lazy loading for images and defer non-critical operations.
+  </Accordion>
+  
+  <Accordion title="Error Handling">
+    Implement comprehensive error states with retry mechanisms. Network issues are common in retail environments.
+  </Accordion>
+  
+  <Accordion title="User Experience">
+    Provide clear visual feedback for selected plans. Show pricing differences prominently to help customers make informed decisions.
+  </Accordion>
+  
+  <Accordion title="Version Compatibility">
+    Always check POS version compatibility. Gracefully degrade features for older POS versions.
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="POS UI Extensions" href="https://shopify.dev/docs/api/pos-ui-extensions" icon="book">
+    Official Shopify documentation for POS extensions
+  </Card>
+  <Card title="Selling Plans API" href="https://shopify.dev/docs/api/admin-graphql/latest/objects/SellingPlan" icon="code">
+    GraphQL API reference for selling plans
+  </Card>
+</CardGroup>

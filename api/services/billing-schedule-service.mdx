@@ -1,0 +1,279 @@
+---
+title: 'Billing Schedule Calculator Service'
+description: 'Service for calculating billing windows based on shop timezone and hour settings'
+---
+
+## Overview
+
+The `BillingScheduleCalculatorService` determines if billing charges or reminders should be processed for a shop based on its configured billing schedule timezone and hour. It handles timezone conversions and calculates billing windows with lookback support for missed schedules.
+
+## BillingScheduleCalculatorService
+
+### Constructor
+
+<ParamField path="record" type="BillingSchedule" required>
+  The billing schedule record containing:
+  - `timezone`: The shop's timezone (e.g., 'America/New_York')
+  - `hour`: The hour to run billing (0-23 in local time)
+</ParamField>
+
+<ParamField path="compareToDate" type="DateTime" required>
+  A Luxon DateTime in UTC to compare against the billing schedule
+</ParamField>
+
+### Properties
+
+#### timeLocal
+
+<ResponseField name="timeLocal" type="DateTime">
+  The `compareToDate` converted to the shop's local timezone and hour, with time components set to the start of the hour
+</ResponseField>
+
+```typescript
+get timeLocal(): DateTime {
+  const { timezone, hour } = this.record;
+  return this.compareToDate.setZone(timezone).set({ hour }).startOf('hour');
+}
+```
+
+#### timeUtc
+
+<ResponseField name="timeUtc" type="DateTime">
+  The shop's local billing time converted back to UTC for job scheduling
+</ResponseField>
+
+```typescript
+get timeUtc(): DateTime {
+  return this.timeLocal.setZone('utc').startOf('hour');
+}
+```
+
+#### billingStartTimeUtc
+
+<ResponseField name="billingStartTimeUtc" type="DateTime">
+  The start of the billing window, calculated as `billingEndTimeUtc` minus `BILLING_CHARGE_DAYS_AGO`
+</ResponseField>
+
+**Purpose:** Allows processing of billing cycles that may have been missed due to timezone changes, daylight saving time, or shop reinstall.
+
+#### billingEndTimeUtc
+
+<ResponseField name="billingEndTimeUtc" type="DateTime">
+  The end of the billing window, calculated as the end of day in the shop's local time, converted to UTC
+</ResponseField>
+
+### Methods
+
+#### isBillable()
+
+Determines if billing should be processed at the given `compareToDate`.
+
+<ResponseField name="return" type="boolean">
+  Returns `true` if the UTC time matches the shop's configured billing hour in their timezone
+</ResponseField>
+
+```typescript
+isBillable(): boolean {
+  return this.timeUtc.equals(this.compareToDate);
+}
+```
+
+### Constants
+
+<ParamField path="BILLING_CHARGE_DAYS_AGO" type="number" default="2">
+  The number of days to look back when calculating the billing window. This should match or exceed the recurring interval of the billing job.
+</ParamField>
+
+## Usage Examples
+
+### Basic Usage
+
+```typescript
+import { BillingScheduleCalculatorService } from '~/services/BillingScheduleCalculatorService';
+import { DateTime } from 'luxon';
+
+const billingSchedule = {
+  timezone: 'America/New_York',
+  hour: 10 // 10 AM local time
+};
+
+const now = DateTime.utc();
+
+const calculator = new BillingScheduleCalculatorService(
+  billingSchedule,
+  now
+);
+
+if (calculator.isBillable()) {
+  console.log('Process billing now');
+  console.log('Billing window:', {
+    start: calculator.billingStartTimeUtc.toISO(),
+    end: calculator.billingEndTimeUtc.toISO()
+  });
+} else {
+  console.log('Not billing time yet');
+}
+```
+
+### Checking Multiple Shops
+
+```typescript
+import { BillingScheduleCalculatorService } from '~/services/BillingScheduleCalculatorService';
+import { DateTime } from 'luxon';
+
+const shops = [
+  { domain: 'shop1.myshopify.com', timezone: 'America/New_York', hour: 10 },
+  { domain: 'shop2.myshopify.com', timezone: 'Europe/London', hour: 14 },
+  { domain: 'shop3.myshopify.com', timezone: 'Asia/Tokyo', hour: 9 }
+];
+
+const currentTime = DateTime.utc();
+
+for (const shop of shops) {
+  const calculator = new BillingScheduleCalculatorService(
+    { timezone: shop.timezone, hour: shop.hour },
+    currentTime
+  );
+
+  if (calculator.isBillable()) {
+    console.log(`Processing billing for ${shop.domain}`);
+    await processBillingForShop(shop.domain, {
+      startTime: calculator.billingStartTimeUtc,
+      endTime: calculator.billingEndTimeUtc
+    });
+  }
+}
+```
+
+### Timezone Conversion Example
+
+```typescript
+import { BillingScheduleCalculatorService } from '~/services/BillingScheduleCalculatorService';
+import { DateTime } from 'luxon';
+
+const billingSchedule = {
+  timezone: 'America/Los_Angeles',
+  hour: 9 // 9 AM Pacific Time
+};
+
+const utcTime = DateTime.utc(2024, 3, 15, 17, 0); // 5 PM UTC
+
+const calculator = new BillingScheduleCalculatorService(
+  billingSchedule,
+  utcTime
+);
+
+console.log('UTC time:', utcTime.toISO());
+// Output: 2024-03-15T17:00:00.000Z
+
+console.log('Local time:', calculator.timeLocal.toISO());
+// Output: 2024-03-15T09:00:00.000-08:00
+
+console.log('Is billable?', calculator.isBillable());
+// Output: true (9 AM PT = 5 PM UTC during PST)
+```
+
+### Processing Billing Window
+
+```typescript
+import { BillingScheduleCalculatorService } from '~/services/BillingScheduleCalculatorService';
+import { DateTime } from 'luxon';
+
+const processBillingCycles = async (shopDomain: string) => {
+  const billingSchedule = await getBillingSchedule(shopDomain);
+  const now = DateTime.utc();
+
+  const calculator = new BillingScheduleCalculatorService(
+    billingSchedule,
+    now
+  );
+
+  if (!calculator.isBillable()) {
+    console.log('Not within billing schedule');
+    return;
+  }
+
+  // Query for billing cycles within the billing window
+  const billingCycles = await queryBillingCycles({
+    shopDomain,
+    billingAttemptExpectedDate: {
+      gte: calculator.billingStartTimeUtc.toISO(),
+      lte: calculator.billingEndTimeUtc.toISO()
+    }
+  });
+
+  console.log(`Found ${billingCycles.length} cycles to process`);
+
+  for (const cycle of billingCycles) {
+    await processBillingCycle(cycle);
+  }
+};
+```
+
+## Design Considerations
+
+### Lookback Window
+
+The `BILLING_CHARGE_DAYS_AGO` constant provides a lookback window to handle edge cases:
+
+1. **Timezone Changes**: If a shop changes its timezone setting
+2. **Daylight Saving Time**: Transitions that shift the billing hour
+3. **Job Failures**: Missed billing runs due to system issues
+4. **Shop Reinstall**: Subscriptions that need to be caught up after app reinstall
+
+### Timezone Handling
+
+- All calculations use Luxon for robust timezone support
+- The `compareToDate` is always in UTC
+- Conversions account for daylight saving time automatically
+- Times are normalized to the start of the hour for consistent comparison
+
+### Billing Window Calculation
+
+```typescript
+// Shop configured for 10 AM EST
+const billingSchedule = { timezone: 'America/New_York', hour: 10 };
+
+// Current time: March 15, 2024 at 3:00 PM UTC (10 AM EST)
+const now = DateTime.utc(2024, 3, 15, 15, 0);
+
+const calculator = new BillingScheduleCalculatorService(billingSchedule, now);
+
+// timeLocal: March 15, 2024 at 10:00 AM EST
+// timeUtc: March 15, 2024 at 3:00 PM UTC
+// billingEndTimeUtc: March 15, 2024 at 11:59:59 PM EST (March 16 at 4:59:59 AM UTC)
+// billingStartTimeUtc: March 13, 2024 at 11:59:59 PM EST (2 days ago)
+
+// isBillable(): true (15:00 UTC matches 10:00 EST)
+```
+
+## Integration with Billing Jobs
+
+```typescript
+import { BillingScheduleCalculatorService } from '~/services/BillingScheduleCalculatorService';
+import { DateTime } from 'luxon';
+import { jobs } from '~/jobs';
+import { ProcessBillingCyclesJob } from '~/jobs/billing/ProcessBillingCyclesJob';
+
+const scheduleBillingForShop = async (shopDomain: string) => {
+  const billingSchedule = await getBillingSchedule(shopDomain);
+  const now = DateTime.utc();
+
+  const calculator = new BillingScheduleCalculatorService(
+    billingSchedule,
+    now
+  );
+
+  if (calculator.isBillable()) {
+    const job = new ProcessBillingCyclesJob({
+      shop: shopDomain,
+      payload: {
+        startTime: calculator.billingStartTimeUtc.toISO(),
+        endTime: calculator.billingEndTimeUtc.toISO()
+      }
+    });
+
+    await jobs.enqueue(job);
+  }
+};
+```

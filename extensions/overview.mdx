@@ -1,0 +1,121 @@
+---
+title: Extensions Overview
+description: Learn about the UI extensions that power the Shopify Subscriptions Reference App
+---
+
+The Shopify Subscriptions Reference App includes five UI extensions that extend subscription functionality across Shopify's ecosystem. Each extension targets specific surfaces to provide seamless subscription management.
+
+## Extension Architecture
+
+Extensions in this app use Shopify's UI Extensions framework to render custom interfaces at specific extension points. They follow a modular architecture with:
+
+- **Extension Targets**: Specific surfaces where the extension renders
+- **API Access**: GraphQL and REST API capabilities
+- **Network Access**: Ability to communicate with external services
+- **Localization**: Multi-language support via i18n
+
+## Available Extensions
+
+<CardGroup cols={2}>
+  <Card title="Buyer Subscriptions" icon="user" href="/extensions/buyer-subscriptions">
+    Customer-facing subscription management in the customer account
+  </Card>
+  <Card title="Admin Subscription Action" icon="sliders" href="/extensions/admin-subs-action">
+    Merchant tools for creating and managing subscription plans in Shopify Admin
+  </Card>
+  <Card title="Thank You Page" icon="check-circle" href="/extensions/thank-you-page">
+    Post-purchase subscription management link on the order status page
+  </Card>
+  <Card title="POS Extension" icon="shopping-cart" href="/extensions/pos-extension">
+    Point of Sale subscription selection for in-person purchases
+  </Card>
+</CardGroup>
+
+## Extension Configuration
+
+All extensions are configured via `shopify.extension.toml` files in their respective directories:
+
+```bash
+extensions/
+├── buyer-subscriptions/
+│   └── shopify.extension.toml
+├── admin-subs-action/
+│   └── shopify.extension.toml
+├── thank-you-page/
+│   └── shopify.extension.toml
+└── pos-extension/
+    └── shopify.extension.toml
+```
+
+## Common Patterns
+
+### API Integration
+
+Extensions use a consistent pattern for API calls:
+
+```typescript
+import {useExtensionApi} from 'foundation/Api';
+
+function MyComponent() {
+  const {i18n, graphql} = useExtensionApi();
+  
+  // Use graphql for queries and mutations
+  const {data, loading, error} = useQuery(MY_QUERY);
+}
+```
+
+### Error Handling
+
+All extensions implement error boundaries and loading states:
+
+```tsx
+<ErrorBoundary>
+  {loading ? <LoadingState /> : <Content />}
+</ErrorBoundary>
+```
+
+### Internationalization
+
+Extensions support multiple languages using Shopify's i18n utilities:
+
+```typescript
+const {i18n} = useExtensionApi();
+const title = i18n.translate('subscriptions');
+```
+
+## Development
+
+### Local Development
+
+Run extensions locally with:
+
+```bash
+npm run dev
+```
+
+### Testing
+
+Each extension includes comprehensive test coverage:
+
+```bash
+npm run test
+```
+
+### Deployment
+
+Deploy extensions with:
+
+```bash
+npm run deploy
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Customer Account Extension" href="/extensions/buyer-subscriptions">
+    Build subscription management for customers
+  </Card>
+  <Card title="Admin Extension" href="/extensions/admin-subs-action">
+    Create merchant-facing subscription tools
+  </Card>
+</CardGroup>

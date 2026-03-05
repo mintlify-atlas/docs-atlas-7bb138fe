@@ -1,0 +1,490 @@
+---
+title: 'SellingPlan Model'
+description: 'API reference for managing Shopify selling plan groups and subscription plans'
+---
+
+# SellingPlan Model
+
+The SellingPlan model provides functions for managing Shopify selling plan groups, which define subscription pricing and delivery options for products.
+
+## Functions
+
+### getSellingPlanGroups
+
+Retrieves a paginated list of selling plan groups.
+
+```typescript
+export async function getSellingPlanGroups(
+  graphql: GraphQLClient,
+  variables: SellingPlanGroupsQueryVariables,
+): Promise<{
+  sellingPlanGroups: SellingPlanGroupListItem[];
+  pageInfo: PaginationInfo;
+}>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="variables" type="SellingPlanGroupsQueryVariables" required>
+  Query variables for filtering and pagination
+  
+  <Expandable title="properties">
+    <ParamField path="first" type="number">
+      Number of items to return (forward pagination)
+    </ParamField>
+    <ParamField path="last" type="number">
+      Number of items to return (backward pagination)
+    </ParamField>
+    <ParamField path="after" type="string">
+      Cursor for forward pagination
+    </ParamField>
+    <ParamField path="before" type="string">
+      Cursor for backward pagination
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="sellingPlanGroups" type="SellingPlanGroupListItem[]">
+  Array of formatted selling plan groups
+</ResponseField>
+
+<ResponseField name="pageInfo" type="PaginationInfo">
+  Pagination information for the result set
+  
+  <Expandable title="properties">
+    <ResponseField name="hasNextPage" type="boolean">
+      Whether there are more items after the current page
+    </ResponseField>
+    <ResponseField name="hasPreviousPage" type="boolean">
+      Whether there are items before the current page
+    </ResponseField>
+    <ResponseField name="startCursor" type="string">
+      Cursor pointing to the first item in the current page
+    </ResponseField>
+    <ResponseField name="endCursor" type="string">
+      Cursor pointing to the last item in the current page
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { getSellingPlanGroups } from '~/models/SellingPlan/SellingPlan.server';
+import { authenticate } from '~/shopify.server';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  
+  const { sellingPlanGroups, pageInfo } = await getSellingPlanGroups(
+    admin.graphql,
+    {
+      first: 20,
+      after: null,
+    }
+  );
+  
+  return json({ sellingPlanGroups, pageInfo });
+}
+```
+
+---
+
+### getSellingPlanGroup
+
+Retrieves a single selling plan group with all its products and variants.
+
+```typescript
+export async function getSellingPlanGroup(
+  graphql: GraphQLClient,
+  variables: { id: string; firstProducts: number },
+): Promise<SellingPlanGroup | null>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="variables" type="object" required>
+  <Expandable title="properties">
+    <ParamField path="id" type="string" required>
+      Global ID of the selling plan group (e.g., `gid://shopify/SellingPlanGroup/123`)
+    </ParamField>
+    <ParamField path="firstProducts" type="number" required>
+      Maximum number of products to fetch per query
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="SellingPlanGroup | null">
+  Formatted selling plan group or null if not found
+  
+  <Expandable title="SellingPlanGroup properties">
+    <ResponseField name="merchantCode" type="string">
+      Merchant-defined code for the selling plan group
+    </ResponseField>
+    <ResponseField name="planName" type="string">
+      Name of the selling plan group
+    </ResponseField>
+    <ResponseField name="offerDiscount" type="string">
+      Whether discounts are offered ("true" or empty string)
+    </ResponseField>
+    <ResponseField name="discountType" type="DiscountTypeType">
+      Type of discount: "PERCENTAGE" | "FIXED_AMOUNT" | "PRICE"
+    </ResponseField>
+    <ResponseField name="discountDeliveryOptions" type="DiscountDeliveryOption[]">
+      Array of delivery and discount configurations
+    </ResponseField>
+    <ResponseField name="products" type="Product[]">
+      Products associated with this selling plan group
+    </ResponseField>
+    <ResponseField name="selectedProductIds" type="string">
+      Comma-separated list of selected product IDs
+    </ResponseField>
+    <ResponseField name="selectedProductVariantIds" type="string">
+      Comma-separated list of selected product variant IDs
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { getSellingPlanGroup } from '~/models/SellingPlan/SellingPlan.server';
+import { composeGid } from '@shopify/admin-graphql-api-utilities';
+import { MAX_SELLING_PLAN_PRODUCTS } from '~/utils/constants';
+
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  const planID = params.id;
+  
+  const sellingPlanGroup = await getSellingPlanGroup(admin.graphql, {
+    id: composeGid('SellingPlanGroup', planID),
+    firstProducts: MAX_SELLING_PLAN_PRODUCTS,
+  });
+  
+  if (!sellingPlanGroup) {
+    throw new Response('Not Found', { status: 404 });
+  }
+  
+  return json({ sellingPlanGroup });
+}
+```
+
+---
+
+### createSellingPlanGroup
+
+Creates a new selling plan group with products and subscription plans.
+
+```typescript
+export async function createSellingPlanGroup(
+  graphql: GraphQLClient,
+  input: CreateSellingPlanGroupInput,
+): Promise<{
+  sellingPlanGroupId?: string;
+  userErrors: UserError[];
+}>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="input" type="CreateSellingPlanGroupInput" required>
+  Configuration for the new selling plan group
+  
+  <Expandable title="properties">
+    <ParamField path="name" type="string" required>
+      Name of the selling plan group
+    </ParamField>
+    <ParamField path="merchantCode" type="string" required>
+      Unique merchant code identifier
+    </ParamField>
+    <ParamField path="productIds" type="string[]" required>
+      Array of product IDs to associate with the group
+    </ParamField>
+    <ParamField path="productVariantIds" type="string[]" required>
+      Array of product variant IDs to associate with the group
+    </ParamField>
+    <ParamField path="discountDeliveryOptions" type="DiscountDeliveryOption[]" required>
+      Delivery frequency and discount configurations
+    </ParamField>
+    <ParamField path="discountType" type="DiscountTypeType" required>
+      Type of discount: "PERCENTAGE" | "FIXED_AMOUNT" | "PRICE"
+    </ParamField>
+    <ParamField path="offerDiscount" type="boolean" required>
+      Whether to offer discounts
+    </ParamField>
+    <ParamField path="currencyCode" type="string" required>
+      Currency code (e.g., "USD", "CAD")
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="sellingPlanGroupId" type="string | undefined">
+  Global ID of the created selling plan group
+</ResponseField>
+
+<ResponseField name="userErrors" type="UserError[]">
+  Array of validation or creation errors
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { createSellingPlanGroup } from '~/models/SellingPlan/SellingPlan.server';
+
+export async function action({ request }: ActionFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  const formData = await request.formData();
+  
+  const { sellingPlanGroupId, userErrors } = await createSellingPlanGroup(
+    admin.graphql,
+    {
+      name: 'Subscribe and Save',
+      merchantCode: 'SUBSCRIBE_SAVE_2024',
+      productIds: ['gid://shopify/Product/123'],
+      productVariantIds: [],
+      discountDeliveryOptions: [
+        {
+          id: 'new-1',
+          deliveryInterval: 'MONTH',
+          deliveryFrequency: 1,
+          discountValue: 10,
+        },
+      ],
+      discountType: 'PERCENTAGE',
+      offerDiscount: true,
+      currencyCode: 'USD',
+    }
+  );
+  
+  if (userErrors.length > 0) {
+    return json({ errors: userErrors }, { status: 400 });
+  }
+  
+  return redirect(`/app/plans/${parseGid(sellingPlanGroupId).id}`);
+}
+```
+
+---
+
+### updateSellingPlanGroup
+
+Updates an existing selling plan group.
+
+```typescript
+export async function updateSellingPlanGroup(
+  graphql: GraphQLClient,
+  input: UpdateSellingPlanGroupVariables,
+): Promise<{
+  sellingPlanGroupId?: string;
+  userErrors: UserError[];
+}>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="input" type="UpdateSellingPlanGroupVariables" required>
+  Update configuration
+  
+  <Expandable title="properties">
+    <ParamField path="id" type="string" required>
+      Global ID of the selling plan group to update
+    </ParamField>
+    <ParamField path="name" type="string" required>
+      Updated name
+    </ParamField>
+    <ParamField path="merchantCode" type="string" required>
+      Updated merchant code
+    </ParamField>
+    <ParamField path="sellingPlansToDelete" type="string[]" required>
+      IDs of selling plans to remove
+    </ParamField>
+    <ParamField path="discountDeliveryOptions" type="DiscountDeliveryOption[]" required>
+      Updated delivery and discount configurations
+    </ParamField>
+    <ParamField path="productIdsToAdd" type="string[]" required>
+      Product IDs to add
+    </ParamField>
+    <ParamField path="productIdsToRemove" type="string[]" required>
+      Product IDs to remove
+    </ParamField>
+    <ParamField path="productVariantIdsToAdd" type="string[]" required>
+      Product variant IDs to add
+    </ParamField>
+    <ParamField path="productVariantIdsToRemove" type="string[]" required>
+      Product variant IDs to remove
+    </ParamField>
+    <ParamField path="discountType" type="DiscountTypeType" required>
+      Type of discount
+    </ParamField>
+    <ParamField path="offerDiscount" type="boolean" required>
+      Whether to offer discounts
+    </ParamField>
+    <ParamField path="currencyCode" type="string" required>
+      Currency code
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="sellingPlanGroupId" type="string | undefined">
+  Global ID of the updated selling plan group
+</ResponseField>
+
+<ResponseField name="userErrors" type="UserError[]">
+  Array of validation or update errors from all mutations
+</ResponseField>
+
+---
+
+### deleteSellingPlanGroup
+
+Deletes a selling plan group.
+
+```typescript
+export async function deleteSellingPlanGroup(
+  graphql: GraphQLClient,
+  sellingPlanGroupId: string,
+): Promise<{ data: DeleteSellingPlanGroupMutationType }>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="sellingPlanGroupId" type="string" required>
+  Global ID of the selling plan group to delete
+</ParamField>
+
+<ResponseField name="data" type="DeleteSellingPlanGroupMutationType">
+  Mutation response data
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { deleteSellingPlanGroup } from '~/models/SellingPlan/SellingPlan.server';
+
+export async function action({ request, params }: ActionFunctionArgs) {
+  const { admin } = await authenticate.admin(request);
+  const planId = composeGid('SellingPlanGroup', params.id);
+  
+  await deleteSellingPlanGroup(admin.graphql, planId);
+  
+  return redirect('/app/plans');
+}
+```
+
+---
+
+### createSellingPlanTranslations
+
+Creates translations for selling plans across multiple locales.
+
+```typescript
+export async function createSellingPlanTranslations(
+  graphql: GraphQLClient,
+  sellingPlans: SellingPlanGroupListItemSellingPlan[],
+  shopLocalesWithoutPrimary: ShopLocale[],
+  currencyCode: string,
+): Promise<void>
+```
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  Authenticated Shopify GraphQL client
+</ParamField>
+
+<ParamField path="sellingPlans" type="SellingPlanGroupListItemSellingPlan[]" required>
+  Array of selling plans to translate
+</ParamField>
+
+<ParamField path="shopLocalesWithoutPrimary" type="ShopLocale[]" required>
+  Array of shop locales (excluding the primary locale)
+</ParamField>
+
+<ParamField path="currencyCode" type="string" required>
+  Currency code for price formatting in translations
+</ParamField>
+
+**Example:**
+
+```typescript
+import { createSellingPlanTranslations } from '~/models/SellingPlan/SellingPlan.server';
+import { getShopLocales } from '~/models/Translations/Translations.server';
+
+const { shopLocalesWithoutPrimary } = await getShopLocales(admin.graphql);
+
+await createSellingPlanTranslations(
+  admin.graphql,
+  sellingPlans,
+  shopLocalesWithoutPrimary,
+  'USD'
+);
+```
+
+## Type Definitions
+
+### SellingPlanGroupListItem
+
+```typescript
+interface SellingPlanGroupListItem {
+  id: string;
+  merchantCode: string;
+  productsCount?: number;
+  productVariantsCount?: number;
+  products?: SellingPlanGroupListItemProduct[];
+  sellingPlans: SellingPlanGroupListItemSellingPlan[];
+  sellingPlansPageInfo: PaginationInfo;
+}
+```
+
+### SellingPlanGroupListItemSellingPlan
+
+```typescript
+interface SellingPlanGroupListItemSellingPlan {
+  id?: string;
+  pricingPolicies?: SellingPlanPricingPolicy[];
+  deliveryPolicy: RecurringPolicy;
+}
+```
+
+### SellingPlanPricingPolicy
+
+```typescript
+interface SellingPlanPricingPolicy {
+  adjustmentType: 'PERCENTAGE' | 'FIXED_AMOUNT' | 'PRICE';
+  adjustmentValue: Percentage | Money;
+}
+```
+
+### RecurringPolicy
+
+```typescript
+interface RecurringPolicy {
+  interval: 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
+  intervalCount: number;
+}
+```
+
+### DiscountDeliveryOption
+
+```typescript
+interface DiscountDeliveryOption {
+  id: string;
+  deliveryFrequency: number;
+  deliveryInterval: 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
+  discountValue?: number;
+}
+```
+
+## Related
+
+- [SubscriptionContract Model](/api/models/subscription-contract)
+- [BillingSchedule Model](/api/models/billing-schedule)
+- [Translations](/api/models/translations)

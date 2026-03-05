@@ -1,0 +1,336 @@
+---
+title: Selling Plans
+description: Learn how selling plan groups define subscription terms, pricing policies, and delivery schedules
+---
+
+## What are Selling Plans?
+
+Selling plans define the terms under which customers can purchase products on a subscription basis. They specify:
+
+- **Delivery frequency**: How often products are delivered
+- **Billing frequency**: How often customers are charged
+- **Pricing policies**: Discounts and pricing adjustments
+- **Associated products**: Which products or variants can be subscribed to
+
+<Note>
+  Selling plans are grouped into **Selling Plan Groups**, which contain one or more selling plans with the same products but different frequencies or discounts.
+</Note>
+
+## Selling Plan Group Structure
+
+A selling plan group is the container for related subscription offerings:
+
+```typescript
+interface SellingPlanGroup {
+  merchantCode: string;           // Internal identifier
+  planName: string;               // Display name
+  products: SelectedProduct[];    // Associated products/variants
+  offerDiscount: string;          // Whether discounts are offered
+  discountType: DiscountTypeType; // 'PERCENTAGE' | 'FIXED_AMOUNT' | 'PRICE'
+  discountDeliveryOptions: DiscountDeliveryOption[];
+  selectedProductIds: string;     // Comma-separated product IDs
+  selectedProductVariantIds: string;
+}
+```
+
+## Delivery and Billing Policies
+
+### Recurring Policies
+
+Both delivery and billing use recurring policies:
+
+```typescript
+interface RecurringPolicy {
+  interval: SellingPlanInterval; // 'DAY' | 'WEEK' | 'MONTH' | 'YEAR'
+  intervalCount: number;         // Frequency multiplier
+}
+```
+
+**Example**: Monthly subscription
+```typescript
+{
+  interval: 'MONTH',
+  intervalCount: 1
+}
+```
+
+**Example**: Every 2 weeks
+```typescript
+{
+  interval: 'WEEK',
+  intervalCount: 2
+}
+```
+
+<Info>
+  In most cases, `billingPolicy` and `deliveryPolicy` have the same values, meaning customers are charged when products ship.
+</Info>
+
+## Pricing Policies
+
+Pricing policies define how subscription prices differ from one-time purchase prices.
+
+### Discount Types
+
+```typescript
+export enum SellingPlanAdjustment {
+  Percentage = 'PERCENTAGE',
+  FixedAmount = 'FIXED_AMOUNT', 
+  Price = 'PRICE',
+}
+```
+
+### Pricing Policy Structure
+
+```typescript
+interface SellingPlanPricingPolicy {
+  adjustmentType: DiscountTypeType;
+  adjustmentValue: {
+    percentage?: number;  // For percentage discounts
+    amount?: number;      // For fixed amount discounts
+  };
+}
+```
+
+### Discount Examples
+
+<CodeGroup>
+```typescript Percentage Discount
+{
+  adjustmentType: 'PERCENTAGE',
+  adjustmentValue: {
+    percentage: 10  // 10% off
+  }
+}
+```
+
+```typescript Fixed Amount Discount
+{
+  adjustmentType: 'FIXED_AMOUNT',
+  adjustmentValue: {
+    amount: 5.00  // $5 off
+  }
+}
+```
+
+```typescript Fixed Price
+{
+  adjustmentType: 'PRICE',
+  adjustmentValue: {
+    amount: 29.99  // Always $29.99
+  }
+}
+```
+</CodeGroup>
+
+<Warning>
+  When using `PRICE` adjustment type, the `amount` represents the absolute price customers pay, not a discount amount.
+</Warning>
+
+## Creating Selling Plan Groups
+
+Selling plan groups are created through the GraphQL Admin API:
+
+```typescript
+interface CreateSellingPlanGroupInput {
+  name: string;
+  merchantCode: string;
+  productIds: string[];           // Full products to include
+  productVariantIds: string[];    // Specific variants to include
+  discountDeliveryOptions: DiscountDeliveryOption[];
+  discountType: DiscountTypeType;
+  offerDiscount: boolean;
+  currencyCode: string;
+}
+```
+
+### Discount Delivery Options
+
+Each delivery option creates a separate selling plan within the group:
+
+```typescript
+interface DiscountDeliveryOption {
+  id?: string;                    // Existing plan ID (for updates)
+  deliveryInterval: 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
+  deliveryFrequency: number;      // intervalCount
+  discountValue: string | number; // Discount amount or percentage
+}
+```
+
+**Example**: Create a subscription with multiple frequencies
+```typescript
+const input = {
+  name: 'Coffee Subscription',
+  merchantCode: 'COFFEE-SUB-001',
+  productIds: ['gid://shopify/Product/123'],
+  productVariantIds: [],
+  discountType: 'PERCENTAGE',
+  offerDiscount: true,
+  currencyCode: 'USD',
+  discountDeliveryOptions: [
+    {
+      deliveryInterval: 'WEEK',
+      deliveryFrequency: 2,
+      discountValue: 10  // 10% off every 2 weeks
+    },
+    {
+      deliveryInterval: 'MONTH',
+      deliveryFrequency: 1,
+      discountValue: 15  // 15% off monthly
+    }
+  ]
+};
+```
+
+## Updating Selling Plan Groups
+
+When updating a selling plan group, you can:
+
+- Add or remove products
+- Add or remove product variants
+- Create new selling plans
+- Update existing selling plans
+- Delete selling plans
+
+```typescript
+interface UpdateSellingPlanGroupVariables {
+  id: string;
+  name: string;
+  merchantCode: string;
+  sellingPlansToDelete: string[];
+  discountDeliveryOptions: DiscountDeliveryOption[];
+  productIdsToAdd: string[];
+  productIdsToRemove: string[];
+  productVariantIdsToAdd: string[];
+  productVariantIdsToRemove: string[];
+  discountType: DiscountTypeType;
+  offerDiscount: boolean;
+  currencyCode: string;
+}
+```
+
+<Note>
+  The app automatically determines whether to create or update selling plans based on whether the `discountDeliveryOption` has an `id` field.
+</Note>
+
+## Selling Plan Translations
+
+The app supports multi-locale selling plan names and descriptions:
+
+```typescript
+interface SellingPlanTranslation {
+  key: string;                    // 'name' or 'description'
+  value: string;                  // Translated text
+  translatableContentDigest: string;
+  locale: string;                 // 'en', 'fr', etc.
+}
+```
+
+Translations are automatically generated based on:
+- Delivery interval and frequency
+- Discount type and value
+- Currency code
+- Shop's configured locales
+
+**Example translation output**:
+- English: "Monthly 10% off"
+- French: "Mensuel 10% de réduction"
+
+## Product and Variant Selection
+
+### Full Product Selection
+
+When you add a product ID, all variants are included:
+
+```typescript
+productIds: ['gid://shopify/Product/123']
+// All variants of product 123 are subscribable
+```
+
+### Specific Variant Selection
+
+Add specific variants when you want granular control:
+
+```typescript
+productVariantIds: [
+  'gid://shopify/ProductVariant/456',
+  'gid://shopify/ProductVariant/789'
+]
+// Only these two variants are subscribable
+```
+
+<Warning>
+  You can mix full products and specific variants, but be careful not to create duplicate subscriptions for the same variant.
+</Warning>
+
+## Querying Selling Plans
+
+### List All Selling Plan Groups
+
+```typescript
+const {sellingPlanGroups, pageInfo} = await getSellingPlanGroups(
+  graphql,
+  {
+    first: 10,
+    after: cursor
+  }
+);
+```
+
+### Get Single Selling Plan Group
+
+```typescript
+const sellingPlanGroup = await getSellingPlanGroup(
+  graphql,
+  {
+    id: 'gid://shopify/SellingPlanGroup/123',
+    firstProducts: 50
+  }
+);
+```
+
+<Info>
+  The `getSellingPlanGroup` function automatically paginates through all products and variants associated with the group.
+</Info>
+
+## Deleting Selling Plan Groups
+
+```typescript
+await deleteSellingPlanGroup(
+  graphql,
+  'gid://shopify/SellingPlanGroup/123'
+);
+```
+
+<Warning>
+  Deleting a selling plan group will affect existing subscription contracts that reference those plans. Ensure contracts are handled appropriately before deletion.
+</Warning>
+
+## FAQs
+
+<Accordion title="Can I have different billing and delivery frequencies?">
+  Yes, though it's uncommon. For example, you could bill monthly but deliver every 2 weeks. However, this creates complexity in contract management and is generally not recommended.
+</Accordion>
+
+<Accordion title="How many selling plans can be in a group?">
+  There's no hard limit, but typically you'd have 2-5 plans per group representing different frequencies (e.g., weekly, bi-weekly, monthly).
+</Accordion>
+
+<Accordion title="Can I change the price of existing subscriptions?">
+  Updating a selling plan's pricing policy affects new subscriptions, but existing subscription contracts maintain their original terms unless explicitly updated through contract editing.
+</Accordion>
+
+<Accordion title="What happens if I remove a product from a selling plan group?">
+  Existing subscription contracts continue unchanged. The product simply becomes unavailable for new subscriptions through that plan.
+</Accordion>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Subscription Contracts" icon="file-contract" href="/concepts/subscription-contracts">
+    Learn how selling plans create subscription contracts
+  </Card>
+  <Card title="Creating Selling Plans" icon="plus" href="/guides/creating-selling-plans">
+    Step-by-step guide to creating selling plans
+  </Card>
+</CardGroup>

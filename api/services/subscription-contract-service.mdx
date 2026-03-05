@@ -1,0 +1,194 @@
+---
+title: 'Subscription Contract Service'
+description: 'Services for managing subscription contract lifecycle operations'
+---
+
+## Overview
+
+The subscription contract services handle core lifecycle operations for subscription contracts including cancellation, pausing, and resuming subscriptions.
+
+## SubscriptionContractCancelService
+
+Cancels a subscription contract using the Shopify GraphQL Admin API.
+
+### Constructor
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  The GraphQL client instance for making API requests
+</ParamField>
+
+<ParamField path="shopDomain" type="string" required>
+  The shop domain for the subscription
+</ParamField>
+
+<ParamField path="subscriptionContractId" type="string" required>
+  The ID of the subscription contract to cancel
+</ParamField>
+
+### Methods
+
+#### run()
+
+Executes the subscription cancellation process.
+
+<ResponseField name="return" type="Promise<void>">
+  Returns a promise that resolves when the cancellation is complete
+</ResponseField>
+
+**Behavior:**
+- Calls the `subscriptionContractCancel` GraphQL mutation
+- Validates the response and handles user errors
+- Logs success or failure with detailed error information
+- Throws an error if cancellation fails
+
+### Usage Example
+
+```typescript
+import { SubscriptionContractCancelService } from '~/services/SubscriptionContractCancelService';
+import { unauthenticated } from '~/shopify.server';
+
+const { admin, session } = await unauthenticated.admin(shopDomain);
+
+const cancelService = new SubscriptionContractCancelService(
+  admin.graphql,
+  session.shop,
+  'gid://shopify/SubscriptionContract/1'
+);
+
+try {
+  await cancelService.run();
+  console.log('Subscription cancelled successfully');
+} catch (error) {
+  console.error('Failed to cancel subscription:', error);
+}
+```
+
+---
+
+## SubscriptionContractPauseService
+
+Pauses a subscription contract and optionally sends a notification email to the customer.
+
+### Constructor
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  The GraphQL client instance for making API requests
+</ParamField>
+
+<ParamField path="shopDomain" type="string" required>
+  The shop domain for the subscription
+</ParamField>
+
+<ParamField path="subscriptionContractId" type="string" required>
+  The ID of the subscription contract to pause
+</ParamField>
+
+<ParamField path="sendCustomerEmail" type="boolean" default="true">
+  Whether to send a pause notification email to the customer
+</ParamField>
+
+### Methods
+
+#### run()
+
+Executes the subscription pause process.
+
+<ResponseField name="return" type="Promise<void>">
+  Returns a promise that resolves when the pause operation is complete
+</ResponseField>
+
+**Behavior:**
+- Calls the `subscriptionContractPause` GraphQL mutation
+- Validates the response and handles user errors
+- Enqueues a `CustomerSendEmailJob` with template `SUBSCRIPTION_PAUSED` if email is enabled
+- Logs success or failure with detailed error information
+
+### Usage Example
+
+```typescript
+import { SubscriptionContractPauseService } from '~/services/SubscriptionContractPauseService';
+import { unauthenticated } from '~/shopify.server';
+
+const { admin, session } = await unauthenticated.admin(shopDomain);
+
+const pauseService = new SubscriptionContractPauseService(
+  admin.graphql,
+  session.shop,
+  'gid://shopify/SubscriptionContract/1',
+  true // Send customer email
+);
+
+await pauseService.run();
+```
+
+---
+
+## SubscriptionContractResumeService
+
+Resumes (activates) a paused subscription contract and sends a notification email to the customer.
+
+### Constructor
+
+<ParamField path="graphql" type="GraphQLClient" required>
+  The GraphQL client instance for making API requests
+</ParamField>
+
+<ParamField path="shopDomain" type="string" required>
+  The shop domain for the subscription
+</ParamField>
+
+<ParamField path="subscriptionContractId" type="string" required>
+  The ID of the subscription contract to resume
+</ParamField>
+
+### Methods
+
+#### run()
+
+Executes the subscription resume process.
+
+<ResponseField name="return" type="Promise<void>">
+  Returns a promise that resolves when the resume operation is complete
+</ResponseField>
+
+**Behavior:**
+- Calls the `subscriptionContractActivate` GraphQL mutation
+- Validates the response and handles user errors
+- Enqueues a `CustomerSendEmailJob` with template `SUBSCRIPTION_RESUMED`
+- Logs success or failure with detailed error information
+
+### Usage Example
+
+```typescript
+import { SubscriptionContractResumeService } from '~/services/SubscriptionContractResumeService';
+import { unauthenticated } from '~/shopify.server';
+
+const { admin, session } = await unauthenticated.admin(shopDomain);
+
+const resumeService = new SubscriptionContractResumeService(
+  admin.graphql,
+  session.shop,
+  'gid://shopify/SubscriptionContract/1'
+);
+
+await resumeService.run();
+console.log('Subscription resumed and customer notified');
+```
+
+## Error Handling
+
+All services implement comprehensive error handling:
+
+- **GraphQL Errors**: Validates response structure and checks for `userErrors`
+- **Logging**: Uses structured logging with context (shop domain, contract ID)
+- **Exception Propagation**: Throws errors with descriptive messages for upstream handling
+
+```typescript
+try {
+  await service.run();
+} catch (error) {
+  // Error includes context about the failure
+  // Check logs for detailed GraphQL user errors
+  console.error('Service failed:', error.message);
+}
+```

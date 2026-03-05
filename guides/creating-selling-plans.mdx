@@ -1,0 +1,415 @@
+---
+title: Creating Selling Plans
+description: Learn how to create and manage selling plan groups for subscription products in the Shopify Subscriptions Reference App
+---
+
+Selling plan groups define the subscription options available to customers, including delivery frequencies and discount structures. This guide walks through creating and updating selling plans.
+
+## Overview
+
+Selling plans consist of:
+- **Selling Plan Group**: Container for related subscription options
+- **Merchant Code**: Unique identifier for the plan
+- **Delivery Options**: Frequency and interval combinations (e.g., "Every 2 weeks")
+- **Pricing Policies**: Discounts applied to subscriptions
+- **Product Associations**: Products or variants eligible for the plan
+
+## Creating a Selling Plan Group
+
+<Steps>
+  <Step title="Define the plan structure">
+    Set up the basic plan information including name, merchant code, and discount settings.
+
+    ```typescript
+    const planInput = {
+      name: 'Monthly Subscription',
+      merchantCode: 'monthly-sub-2024',
+      productIds: ['gid://shopify/Product/123'],
+      productVariantIds: [],
+      discountDeliveryOptions: [
+        {
+          deliveryInterval: 'MONTH',
+          deliveryFrequency: 1,
+          discountValue: 10,
+        },
+      ],
+      discountType: 'PERCENTAGE',
+      offerDiscount: true,
+      currencyCode: 'USD',
+    };
+    ```
+  </Step>
+
+  <Step title="Call the createSellingPlanGroup mutation">
+    Use the GraphQL Admin API to create the selling plan group:
+
+    ```graphql
+    mutation CreateSellingPlanGroup(
+      $input: SellingPlanGroupInput!
+      $resources: SellingPlanGroupResourceInput
+    ) {
+      sellingPlanGroupCreate(input: $input, resources: $resources) {
+        sellingPlanGroup {
+          id
+          sellingPlans(first: 31) {
+            edges {
+              node {
+                id
+                name
+                options
+              }
+            }
+          }
+        }
+        userErrors {
+          message
+        }
+      }
+    }
+    ```
+
+    <Note>
+      The mutation returns the created selling plan group ID and any validation errors.
+    </Note>
+  </Step>
+
+  <Step title="Handle translations">
+    After creation, a webhook automatically triggers translation creation for all shop locales:
+
+    ```typescript
+    // Automatically handled by webhook
+    // app/routes/webhooks.selling_plan_groups.create_or_update.tsx
+    jobs.enqueue(
+      new CreateSellingPlanTranslationsJob({
+        shop,
+        payload: payload as Webhooks.SellingPlanGroups,
+      }),
+    );
+    ```
+
+    <Tip>
+      Translations are automatically generated based on delivery frequency and discount values for all configured shop locales.
+    </Tip>
+  </Step>
+</Steps>
+
+## Implementation Example
+
+Here's the complete server-side implementation from the reference app:
+
+```typescript filename="app/models/SellingPlan/SellingPlan.server.ts"
+export async function createSellingPlanGroup(
+  graphql,
+  input: CreateSellingPlanGroupInput,
+) {
+  const {
+    name,
+    merchantCode,
+    productIds,
+    productVariantIds,
+    discountDeliveryOptions,
+    discountType,
+    offerDiscount,
+    currencyCode,
+  } = input;
+
+  const {primaryLocale} = await getShopLocales(graphql);
+  const t = await i18n.getFixedT(primaryLocale, 'app.plans.details');
+
+  // Convert discount delivery options into selling plan format
+  const sellingPlansToCreate = getSellingPlansFromDiscountDeliveryOptions(
+    discountDeliveryOptions,
+    discountType,
+    offerDiscount,
+    currencyCode,
+    t,
+    primaryLocale,
+  );
+
+  const response = await graphql(CreateSellingPlanGroupMutation, {
+    variables: {
+      input: {
+        name,
+        merchantCode,
+        options: [t('creationMutation.options.deliveryFrequency')],
+        sellingPlansToCreate,
+      },
+      resources: {
+        productIds,
+        productVariantIds,
+      },
+    },
+  });
+
+  const {data: {sellingPlanGroupCreate}} = await response.json();
+
+  return {
+    sellingPlanGroupId: sellingPlanGroupCreate?.sellingPlanGroup?.id,
+    userErrors: sellingPlanGroupCreate?.userErrors,
+  };
+}
+```
+
+## Discount Types
+
+The app supports three discount types:
+
+<CardGroup cols={3}>
+  <Card title="Percentage" icon="percent">
+    Apply a percentage discount (e.g., 10% off)
+    ```typescript
+    discountType: 'PERCENTAGE'
+    discountValue: 10
+    ```
+  </Card>
+  <Card title="Fixed Amount" icon="dollar-sign">
+    Apply a fixed amount discount (e.g., $5 off)
+    ```typescript
+    discountType: 'FIXED_AMOUNT'
+    discountValue: 5
+    ```
+  </Card>
+  <Card title="Fixed Price" icon="tag">
+    Set a fixed price (e.g., $19.99)
+    ```typescript
+    discountType: 'PRICE'
+    discountValue: 19.99
+    ```
+  </Card>
+</CardGroup>
+
+## Delivery Intervals
+
+Supported delivery intervals:
+
+| Interval | Description | Example |
+|----------|-------------|----------|
+| `WEEK` | Weekly delivery | Every 2 weeks |
+| `MONTH` | Monthly delivery | Every 1 month |
+| `YEAR` | Yearly delivery | Every 1 year |
+
+```typescript filename="Example: Multiple delivery options"
+const discountDeliveryOptions = [
+  {
+    deliveryInterval: 'WEEK',
+    deliveryFrequency: 2,
+    discountValue: 5,
+  },
+  {
+    deliveryInterval: 'MONTH',
+    deliveryFrequency: 1,
+    discountValue: 10,
+  },
+  {
+    deliveryInterval: 'MONTH',
+    deliveryFrequency: 3,
+    discountValue: 15,
+  },
+];
+```
+
+## Updating Selling Plans
+
+To update an existing selling plan group:
+
+```typescript filename="app/models/SellingPlan/SellingPlan.server.ts"
+export async function updateSellingPlanGroup(
+  graphql,
+  input: UpdateSellingPlanGroupVariables,
+) {
+  const {primaryLocale} = await getShopLocales(graphql);
+  const t = await i18n.getFixedT(primaryLocale, 'app.plans.details');
+
+  const sellingPlans = getSellingPlansFromDiscountDeliveryOptions(
+    input.discountDeliveryOptions,
+    input.discountType,
+    input.offerDiscount,
+    input.currencyCode,
+    t,
+    primaryLocale,
+  );
+
+  // Separate new and existing plans
+  let sellingPlansToCreate = [];
+  let sellingPlansToUpdate = [];
+
+  sellingPlans.forEach((sellingPlan) => {
+    if (sellingPlan.id) {
+      sellingPlansToUpdate.push(sellingPlan);
+    } else {
+      sellingPlansToCreate.push(sellingPlan);
+    }
+  });
+
+  const variables = {
+    id: input.id,
+    input: {
+      name: input.name,
+      merchantCode: input.merchantCode,
+      sellingPlansToDelete: input.sellingPlansToDelete,
+      sellingPlansToCreate,
+      sellingPlansToUpdate,
+      options: [t('creationMutation.options.deliveryFrequency')],
+    },
+    productIdsToAdd: input.productIdsToAdd,
+    productIdsToRemove: input.productIdsToRemove,
+    productVariantIdsToAdd: input.productVariantIdsToAdd,
+    productVariantIdsToRemove: input.productVariantIdsToRemove,
+  };
+
+  const response = await graphql(SellingPlanGroupUpdateMutation, {variables});
+  const {data} = await response.json();
+
+  return {
+    sellingPlanGroupId: data.sellingPlanGroupUpdate?.sellingPlanGroup?.id,
+    userErrors: [
+      ...(data.sellingPlanGroupUpdate?.userErrors ?? []),
+      ...(data.sellingPlanGroupAddProducts?.userErrors ?? []),
+      ...(data.sellingPlanGroupRemoveProducts?.userErrors ?? []),
+    ],
+  };
+}
+```
+
+<Warning>
+  When updating selling plans, ensure that active subscriptions using deleted plans are handled appropriately. Customers on deleted plans will continue on their existing schedule.
+</Warning>
+
+## Route Implementation
+
+The reference app implements selling plan creation in the route handler:
+
+```typescript filename="app/routes/app.plans.$id/route.tsx"
+export async function action({request, params}: ActionFunctionArgs) {
+  const {admin} = await authenticate.admin(request);
+  const t = await i18n.getFixedT(request, 'app.plans.details');
+  const planID = params.id;
+
+  const validationResult = await validateFormData(
+    getSellingPlanFormSchema(t),
+    await request.formData(),
+  );
+
+  if (validationResult.error) {
+    return validationError(validationResult.error);
+  }
+
+  const {merchantCode, planName, selectedProductIds, discountDeliveryOptions} = 
+    validationResult.data;
+
+  if (planID === 'create') {
+    const {sellingPlanGroupId, userErrors} = await createSellingPlanGroup(
+      admin.graphql,
+      {
+        merchantCode,
+        name: planName,
+        productIds: formStringToArray(selectedProductIds),
+        productVariantIds: formStringToArray(selectedVariantIds),
+        discountDeliveryOptions: discountDeliveryOptions || [],
+        offerDiscount: Boolean(offerDiscount),
+        discountType: discountType || DiscountType.PERCENTAGE,
+        currencyCode: shopCurrencyCode || 'USD',
+      },
+    );
+
+    if (!sellingPlanGroupId || userErrors?.length) {
+      return json(
+        toast(userErrors?.[0]?.message || t('SubscriptionPlanForm.createError'), 
+          {isError: true}),
+        {status: 500},
+      );
+    }
+
+    return redirect(`/app/plans/${parseGid(sellingPlanGroupId)}?planCreated=true`);
+  }
+}
+```
+
+## Product Assignment
+
+You can assign selling plans at the product or variant level:
+
+### Product-Level Assignment
+
+```typescript
+// All variants of these products will have the selling plan
+const productIds = [
+  'gid://shopify/Product/123',
+  'gid://shopify/Product/456',
+];
+const productVariantIds = [];
+```
+
+### Variant-Level Assignment
+
+```typescript
+// Only specific variants will have the selling plan
+const productIds = [];
+const productVariantIds = [
+  'gid://shopify/ProductVariant/789',
+  'gid://shopify/ProductVariant/101',
+];
+```
+
+<Tip>
+  Product-level assignment is more efficient for products where all variants should be available for subscription.
+</Tip>
+
+## Best Practices
+
+<Steps>
+  <Step title="Use descriptive merchant codes">
+    Choose clear, unique identifiers like `monthly-coffee-subscription` rather than `plan1`.
+  </Step>
+
+  <Step title="Provide multiple frequency options">
+    Offer 2-3 delivery frequency options to match different customer preferences.
+  </Step>
+
+  <Step title="Test with different locales">
+    Verify that translations generate correctly for all enabled shop locales.
+  </Step>
+
+  <Step title="Handle errors gracefully">
+    Always check for `userErrors` in mutation responses and display helpful messages to users.
+  </Step>
+</Steps>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Duplicate merchant codes">
+    Each selling plan group must have a unique merchant code. Use validation to prevent duplicates:
+
+    ```typescript
+    if (userErrors?.some(error => error.message.includes('merchant code'))) {
+      return 'Merchant code already exists';
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Product not accepting subscriptions">
+    Ensure products are not gift cards or other restricted product types. Subscriptions work best with physical products.
+  </Accordion>
+
+  <Accordion title="Translations not appearing">
+    Check that the `CreateSellingPlanTranslationsJob` completed successfully. Verify webhook configuration in `shopify.app.toml`:
+
+    ```toml
+    [[webhooks.subscriptions]]
+    topics = [ "selling_plan_groups/create", "selling_plan_groups/update" ]
+    uri = "/webhooks/selling_plan_groups/create_or_update"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Managing Contracts" icon="file-contract" href="/guides/managing-contracts">
+    Learn how to manage subscription contracts once customers subscribe
+  </Card>
+  <Card title="Setting Up Webhooks" icon="webhook" href="/guides/setting-up-webhooks">
+    Configure webhooks to handle selling plan events
+  </Card>
+</CardGroup>

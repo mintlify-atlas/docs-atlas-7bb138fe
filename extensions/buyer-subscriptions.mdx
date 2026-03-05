@@ -1,0 +1,434 @@
+---
+title: Buyer Subscriptions Extension
+description: Customer account extension for subscription management
+---
+
+The Buyer Subscriptions extension provides a complete subscription management interface within the customer account. Customers can view, pause, resume, cancel, and modify their subscriptions.
+
+## Extension Configuration
+
+The extension is configured in `shopify.extension.toml`:
+
+```toml
+api_version = "2025-01"
+
+[[extensions]]
+type = "ui_extension"
+name = "Management page"
+handle = "buyer-subscriptions"
+
+  [[extensions.targeting]]
+  module = "./src/index.tsx"
+  target = "customer-account.page.render"
+
+  [extensions.capabilities]
+  api_access = true
+  network_access = true
+```
+
+### Extension Target
+
+- **Target**: `customer-account.page.render`
+- **Surface**: Customer account pages
+- **Capabilities**: API access, network access
+
+## Architecture
+
+The extension uses a router-based architecture to handle multiple views:
+
+```tsx
+import {reactExtension} from '@shopify/ui-extensions-react/customer-account';
+import {Router} from './App';
+import {ErrorBoundary} from 'foundation/ErrorBoundary';
+
+export default reactExtension('customer-account.page.render', () => <App />);
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <Router />
+    </ErrorBoundary>
+  );
+}
+```
+
+## Key Features
+
+### Subscription List View
+
+Displays all customer subscriptions in a grid layout:
+
+```tsx
+import {
+  Grid,
+  BlockStack,
+  Page,
+} from '@shopify/ui-extensions-react/customer-account';
+import {useSubscriptionListData} from './hooks/useSubscriptionListData';
+
+export function SubscriptionList() {
+  const {i18n} = useExtensionApi();
+  const {data, loading, error, refetchSubscriptionListData} =
+    useSubscriptionListData();
+
+  if (loading && !data) {
+    return <SubscriptionListLoadingState />;
+  }
+
+  if (data?.subscriptionContracts.length === 0) {
+    return <SubscriptionListEmptyState />;
+  }
+
+  return (
+    <Page title={i18n.translate('subscriptions')}>
+      <Grid
+        columns={['fill', 'fill', 'fill']}
+        spacing="loose"
+        rows="auto"
+      >
+        {data?.subscriptionContracts.map((contract) => (
+          <SubscriptionListItem key={contract.id} {...contract} />
+        ))}
+      </Grid>
+    </Page>
+  );
+}
+```
+
+### Subscription Details View
+
+Provides detailed information and management actions:
+
+```tsx
+export function SubscriptionDetails({id}: {id: string}) {
+  const {data, loading, error, refetchSubscriptionContract} =
+    useSubscriptionContract({id});
+  const {i18n} = useExtensionApi();
+
+  const {
+    deliveryPolicy,
+    lines,
+    orders,
+    shippingAddress,
+    priceBreakdownEstimate,
+    status,
+    upcomingBillingCycles,
+  } = data.subscriptionContract;
+
+  return (
+    <Page
+      title={i18n.translate('manageSubscription')}
+      secondaryAction={<Button to="extension:/" />}
+      primaryAction={
+        <DetailsActions
+          contractId={contractId}
+          status={status}
+          refetchSubscriptionContract={refetchSubscriptionContract}
+        />
+      }
+    >
+      <Grid columns={['fill', 'fill']} spacing="loose">
+        <GridItem>
+          <UpcomingOrderCard
+            contractId={contractId}
+            upcomingBillingCycles={upcomingBillingCycles}
+          />
+          <OverviewCard
+            deliveryPolicy={deliveryPolicy}
+            shippingAddress={shippingAddress}
+          />
+        </GridItem>
+        <GridItem>
+          <PriceSummaryCard
+            price={priceBreakdownEstimate}
+            lines={lines}
+          />
+          <PastOrdersCard orders={orders} />
+        </GridItem>
+      </Grid>
+    </Page>
+  );
+}
+```
+
+## Subscription Actions
+
+The extension supports comprehensive subscription management:
+
+### Pause Subscription
+
+```graphql
+mutation PauseSubscriptionContract($contractId: ID!) {
+  subscriptionContractPause(subscriptionContractId: $contractId) {
+    contract {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### Resume Subscription
+
+```graphql
+mutation ActivateSubscription($contractId: ID!) {
+  subscriptionContractActivate(subscriptionContractId: $contractId) {
+    contract {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### Cancel Subscription
+
+```graphql
+mutation CancelSubscription($contractId: ID!) {
+  subscriptionContractCancel(subscriptionContractId: $contractId) {
+    contract {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+### Skip Order
+
+```graphql
+mutation SkipBillingCycle($billingCycleInput: SubscriptionBillingCycleSkipInput!) {
+  subscriptionBillingCycleSkip(billingCycleInput: $billingCycleInput) {
+    billingCycle {
+      cycleIndex
+      skipped
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+## Components
+
+The extension includes modular components:
+
+### SubscriptionListItem
+
+Displays individual subscriptions in the list view:
+
+- Product image and name
+- Subscription status badge
+- Next billing date
+- Quick actions (pause, resume, cancel)
+
+### UpcomingOrderCard
+
+Shows details about the next scheduled order:
+
+- Billing date
+- Order items
+- Total price
+- Skip order action
+
+### OverviewCard
+
+Displays subscription overview:
+
+- Delivery frequency
+- Shipping address
+- Payment method
+- Edit actions
+
+### PriceSummaryCard
+
+Breaks down subscription pricing:
+
+- Subtotal
+- Shipping
+- Taxes
+- Discounts
+- Total
+
+### PastOrdersCard
+
+Lists previous subscription orders:
+
+- Order number
+- Order date
+- Order total
+- View order link
+
+## Modals
+
+Interactive modals handle complex actions:
+
+### DeliveryModal
+
+Allows customers to update delivery address and method:
+
+```tsx
+<DeliveryModal
+  contractId={contractId}
+  currentAddress={shippingAddress}
+  onSuccess={refetchSubscriptionContract}
+/>
+```
+
+### CancelSubscriptionModal
+
+Confirms cancellation with optional feedback:
+
+```tsx
+<CancelSubscriptionModal
+  contractId={contractId}
+  onSuccess={refetchSubscriptionContract}
+/>
+```
+
+### PauseSubscriptionModal
+
+Lets customers temporarily pause subscriptions:
+
+```tsx
+<PauseSubscriptionModal
+  contractId={contractId}
+  onSuccess={refetchSubscriptionContract}
+/>
+```
+
+## API Integration
+
+The extension uses custom hooks for data fetching:
+
+```typescript
+export function useSubscriptionListData() {
+  const {graphql} = useExtensionApi();
+  
+  const {data, loading, error, refetch} = graphql(
+    SubscriptionListQuery,
+    {variables: {}}
+  );
+  
+  return {
+    data: data?.customer,
+    loading,
+    error,
+    refetchSubscriptionListData: refetch,
+  };
+}
+```
+
+## Routing
+
+The extension implements client-side routing:
+
+```tsx
+export function Router() {
+  const currentEntry = useNavigationCurrentEntry();
+  const url = new URL(currentEntry.url);
+
+  if (url.pathname.includes('subscriptions')) {
+    const id = getSubscriptionIdFromPath(url.pathname);
+    return <SubscriptionDetails id={id} />;
+  }
+  
+  return <SubscriptionList />;
+}
+```
+
+## Testing
+
+The extension includes comprehensive tests:
+
+```typescript
+describe('SubscriptionList', () => {
+  it('renders subscription cards', async () => {
+    const {findByText} = render(
+      <SubscriptionList />,
+      {wrapper: TestWrapper}
+    );
+    
+    expect(await findByText('Monthly Coffee')).toBeInTheDocument();
+  });
+  
+  it('handles pause action', async () => {
+    const {getByText} = render(<SubscriptionListItem {...mockData} />);
+    
+    fireEvent.click(getByText('Pause'));
+    expect(pauseMutation).toHaveBeenCalled();
+  });
+});
+```
+
+## Error Handling
+
+Robust error handling ensures a smooth user experience:
+
+```tsx
+function SubscriptionListErrorState() {
+  const {i18n} = useExtensionApi();
+
+  return (
+    <Banner status="critical">
+      {i18n.translate('subscriptionList.fetchError')}
+    </Banner>
+  );
+}
+```
+
+## Localization
+
+All text is localized using i18n:
+
+```json
+{
+  "subscriptions": "Subscriptions",
+  "manageSubscription": "Manage Subscription",
+  "pause": "Pause",
+  "resume": "Resume",
+  "cancel": "Cancel",
+  "skipOrder": "Skip next order"
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="State Management">
+    Use the extension's built-in hooks for data fetching and state management. Avoid prop drilling by using context where appropriate.
+  </Accordion>
+  
+  <Accordion title="Performance">
+    Implement optimistic updates for quick user feedback. Use loading states and skeletons during data fetching.
+  </Accordion>
+  
+  <Accordion title="Accessibility">
+    Ensure all interactive elements have proper ARIA labels and keyboard navigation support.
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Shopify UI Extensions" href="https://shopify.dev/docs/api/customer-account-ui-extensions" icon="book">
+    Official Shopify documentation for customer account extensions
+  </Card>
+  <Card title="Admin Extension" href="/extensions/admin-subs-action" icon="arrow-right">
+    Learn about the admin subscription management extension
+  </Card>
+</CardGroup>
